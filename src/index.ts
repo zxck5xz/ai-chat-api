@@ -1,0 +1,36 @@
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import type { Env } from './types';
+import conversations from './routes/conversations';
+import messages from './routes/messages';
+
+const app = new Hono<{ Bindings: Env }>();
+
+// CORS middleware
+app.use('*', cors({
+  origin: ['http://localhost:3000', 'https://*.vercel.app'],
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// Health check
+app.get('/', (c) => {
+  return c.json({ status: 'ok', service: 'ai-chat-api' });
+});
+
+// Routes
+app.route('/api/conversations', conversations);
+app.route('/api/messages', messages);
+
+// 404 handler
+app.notFound((c) => {
+  return c.json({ error: 'Not found' }, 404);
+});
+
+// Error handler
+app.onError((err, c) => {
+  console.error('App error:', err);
+  return c.json({ error: 'Internal server error' }, 500);
+});
+
+export default app;

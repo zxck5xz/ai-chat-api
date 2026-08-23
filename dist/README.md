@@ -1,0 +1,1 @@
+This folder contains the built output assets for the worker "ai-chat-api" generated at 2026-08-23T12:37:43.579Z.
