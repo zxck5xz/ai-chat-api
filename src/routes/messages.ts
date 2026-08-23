@@ -55,6 +55,18 @@ messages.post('/chat', async (c) => {
 
     // Save user message to DB
     if (conversationId && chatMessages.length > 0) {
+      // Create conversation if not exists
+      const existing = await c.env.DB.prepare(
+        'SELECT id FROM conversations WHERE id = ?'
+      ).bind(conversationId).first();
+
+      if (!existing) {
+        const title = chatMessages[0]?.content?.slice(0, 50) || 'New Chat';
+        await c.env.DB.prepare(
+          'INSERT INTO conversations (id, title) VALUES (?, ?)'
+        ).bind(conversationId, title).run();
+      }
+
       const lastUserMsg = chatMessages[chatMessages.length - 1];
       if (lastUserMsg.role === 'user') {
         const msgId = crypto.randomUUID();
@@ -75,35 +87,50 @@ messages.post('/chat', async (c) => {
       }
     }
 
-    // Call Google Gemini API
+    // Call Google Gemini API with retry
     const apiKey = c.env.GEMINI_API_KEY;
-    const model = 'gemini-3.6-flash';
+    const models = ['gemini-3.6-flash', 'gemini-2.0-flash-lite'];
 
     const contents = chatMessages.map((msg) => ({
       role: msg.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: msg.content }],
     }));
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          contents,
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 4096,
-          },
-        }),
-      }
-    );
+    let response: Response | null = null;
+    let lastError = '';
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('Gemini error:', response.status, error);
-      return c.json({ error: 'Failed to call AI model', details: error }, 500);
+    for (const model of models) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, 1000 * attempt));
+        }
+
+        response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+              contents,
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 4096,
+              },
+            }),
+          }
+        );
+
+        if (response.ok) break;
+
+        lastError = await response.text();
+        console.error(`Gemini ${model} error (attempt ${attempt + 1}):`, response.status, lastError);
+      }
+      if (response?.ok) break;
+    }
+
+    if (!response || !response.ok) {
+      return c.json({ error: 'Failed to call AI model', details: lastError }, 503);
     }
 
     const result = await response.json();

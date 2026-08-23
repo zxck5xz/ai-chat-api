@@ -8,7 +8,7 @@ const app = new Hono<{ Bindings: Env }>();
 
 // CORS middleware
 app.use('*', cors({
-  origin: ['http://localhost:3000', 'https://*.vercel.app'],
+  origin: '*',
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
 }));
