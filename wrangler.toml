@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "ai-chat-db"
-database_id = "YOUR_DATABASE_ID_HERE"
+database_id = "ee6fe2cb-0284-4416-a849-3aed8ecc0717"
 # Uncomment after running: wrangler d1 create ai-chat-db
 
 # Environment variables (set via wrangler secret put OPENAI_API_KEY)

@@ -43,132 +43,92 @@ const MOCK_SOURCES: Source[] = [
   },
 ];
 
-// Send message and stream response
+// Send message
 messages.post('/chat', async (c) => {
-  const { messages: chatMessages, conversationId } = await c.req.json();
+  try {
+    const body = await c.req.json<{ messages: { role: string; content: string }[]; conversationId?: string }>();
+    const { messages: chatMessages, conversationId } = body;
 
-  if (!chatMessages || !Array.isArray(chatMessages)) {
-    return c.json({ error: 'messages array is required' }, 400);
-  }
+    if (!chatMessages || !Array.isArray(chatMessages)) {
+      return c.json({ error: 'messages array is required' }, 400);
+    }
 
-  // Save user message to DB
-  if (conversationId && chatMessages.length > 0) {
-    const lastUserMsg = chatMessages[chatMessages.length - 1];
-    if (lastUserMsg.role === 'user') {
-      const msgId = crypto.randomUUID();
-      await c.env.DB.prepare(
-        'INSERT INTO messages (id, conversation_id, role, content) VALUES (?, ?, ?, ?)'
-      ).bind(msgId, conversationId, 'user', lastUserMsg.content).run();
-
-      // Update conversation title if first message
-      const { count } = await c.env.DB.prepare(
-        'SELECT COUNT(*) as count FROM messages WHERE conversation_id = ?'
-      ).bind(conversationId).first() as { count: number };
-
-      if (count === 1) {
-        const title = lastUserMsg.content.slice(0, 50) + (lastUserMsg.content.length > 50 ? '...' : '');
+    // Save user message to DB
+    if (conversationId && chatMessages.length > 0) {
+      const lastUserMsg = chatMessages[chatMessages.length - 1];
+      if (lastUserMsg.role === 'user') {
+        const msgId = crypto.randomUUID();
         await c.env.DB.prepare(
-          'UPDATE conversations SET title = ?, updated_at = datetime("now") WHERE id = ?'
-        ).bind(title, conversationId).run();
+          'INSERT INTO messages (id, conversation_id, role, content) VALUES (?, ?, ?, ?)'
+        ).bind(msgId, conversationId, 'user', lastUserMsg.content).run();
+
+        const { count } = await c.env.DB.prepare(
+          'SELECT COUNT(*) as count FROM messages WHERE conversation_id = ?'
+        ).bind(conversationId).first() as { count: number };
+
+        if (count === 1) {
+          const title = lastUserMsg.content.slice(0, 50) + (lastUserMsg.content.length > 50 ? '...' : '');
+          await c.env.DB.prepare(
+            'UPDATE conversations SET title = ?, updated_at = datetime("now") WHERE id = ?'
+          ).bind(title, conversationId).run();
+        }
       }
     }
-  }
 
-  // Call OpenAI API
-  const apiKey = c.env.OPENAI_API_KEY;
+    // Call Google Gemini API
+    const apiKey = c.env.GEMINI_API_KEY;
+    const model = 'gemini-3.6-flash';
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        ...chatMessages,
-      ],
-      temperature: 0.7,
-      max_tokens: 4096,
-      stream: true,
-    }),
-  });
+    const contents = chatMessages.map((msg) => ({
+      role: msg.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: msg.content }],
+    }));
 
-  if (!response.ok) {
-    const error = await response.text();
-    console.error('OpenAI error:', error);
-    return c.json({ error: 'Failed to call AI model' }, 500);
-  }
-
-  // Stream response back to client
-  const encoder = new TextEncoder();
-  let fullContent = '';
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      const reader = response.body?.getReader();
-      if (!reader) {
-        controller.close();
-        return;
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents,
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 4096,
+          },
+        }),
       }
+    );
 
-      const decoder = new TextDecoder();
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('Gemini error:', response.status, error);
+      return c.json({ error: 'Failed to call AI model', details: error }, 500);
+    }
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+    const result = await response.json();
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n').filter((line) => line.startsWith('data: '));
+    // Save assistant message to DB
+    if (conversationId && text) {
+      const msgId = crypto.randomUUID();
+      await c.env.DB.prepare(
+        'INSERT INTO messages (id, conversation_id, role, content, sources) VALUES (?, ?, ?, ?, ?)'
+      ).bind(msgId, conversationId, 'assistant', text, JSON.stringify(MOCK_SOURCES)).run();
 
-          for (const line of lines) {
-            const data = line.slice(6);
-            if (data === '[DONE]') break;
+      await c.env.DB.prepare(
+        'UPDATE conversations SET updated_at = datetime("now") WHERE id = ?'
+      ).bind(conversationId).run();
+    }
 
-            try {
-              const json = JSON.parse(data);
-              const content = json.choices?.[0]?.delta?.content;
-              if (content) {
-                fullContent += content;
-                controller.enqueue(encoder.encode(content));
-              }
-            } catch {
-              // Skip malformed JSON
-            }
-          }
-        }
-
-        // Append sources at the end
-        const sourcesData = `\n\n[SOURCES]${JSON.stringify(MOCK_SOURCES)}[/SOURCES]`;
-        controller.enqueue(encoder.encode(sourcesData));
-
-        // Save assistant message to DB
-        if (conversationId) {
-          const msgId = crypto.randomUUID();
-          await c.env.DB.prepare(
-            'INSERT INTO messages (id, conversation_id, role, content, sources) VALUES (?, ?, ?, ?, ?)'
-          ).bind(msgId, conversationId, 'assistant', fullContent, JSON.stringify(MOCK_SOURCES)).run();
-
-          await c.env.DB.prepare(
-            'UPDATE conversations SET updated_at = datetime("now") WHERE id = ?'
-          ).bind(conversationId).run();
-        }
-      } catch (error) {
-        console.error('Stream error:', error);
-      } finally {
-        controller.close();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Transfer-Encoding': 'chunked',
-    },
-  });
+    return c.json({
+      content: text,
+      sources: MOCK_SOURCES,
+    });
+  } catch (err) {
+    console.error('Chat error:', err);
+    return c.json({ error: 'Internal error', message: err instanceof Error ? err.message : String(err) }, 500);
+  }
 });
 
 // Update message feedback
