@@ -43,7 +43,12 @@ const MOCK_SOURCES: Source[] = [
   },
 ];
 
-// Send message
+// SSE helper: format message as SSE data
+function formatSSE(data: string): string {
+  return `data: ${data}\n\n`;
+}
+
+// Send message (streaming)
 messages.post('/chat', async (c) => {
   try {
     const body = await c.req.json<{ messages: { role: string; content: string }[]; conversationId?: string }>();
@@ -87,7 +92,7 @@ messages.post('/chat', async (c) => {
       }
     }
 
-    // Call Google Gemini API with retry
+    // Call Google Gemini API with streaming
     const apiKey = c.env.GEMINI_API_KEY;
     const models = ['gemini-3.6-flash', 'gemini-2.0-flash-lite'];
 
@@ -98,6 +103,7 @@ messages.post('/chat', async (c) => {
 
     let response: Response | null = null;
     let lastError = '';
+    let selectedModel = '';
 
     for (const model of models) {
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -106,7 +112,7 @@ messages.post('/chat', async (c) => {
         }
 
         response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -121,7 +127,10 @@ messages.post('/chat', async (c) => {
           }
         );
 
-        if (response.ok) break;
+        if (response.ok) {
+          selectedModel = model;
+          break;
+        }
 
         lastError = await response.text();
         console.error(`Gemini ${model} error (attempt ${attempt + 1}):`, response.status, lastError);
@@ -133,24 +142,83 @@ messages.post('/chat', async (c) => {
       return c.json({ error: 'Failed to call AI model', details: lastError }, 503);
     }
 
-    const result = await response.json();
-    const text = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    // Create SSE stream
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          let fullText = '';
+          const reader = response!.body?.getReader();
+          const decoder = new TextDecoder();
 
-    // Save assistant message to DB
-    if (conversationId && text) {
-      const msgId = crypto.randomUUID();
-      await c.env.DB.prepare(
-        'INSERT INTO messages (id, conversation_id, role, content, sources) VALUES (?, ?, ?, ?, ?)'
-      ).bind(msgId, conversationId, 'assistant', text, JSON.stringify(MOCK_SOURCES)).run();
+          if (!reader) {
+            controller.enqueue(encoder.encode(formatSSE(JSON.stringify({ type: 'error', message: 'No stream available' }))));
+            controller.close();
+            return;
+          }
 
-      await c.env.DB.prepare(
-        'UPDATE conversations SET updated_at = datetime("now") WHERE id = ?'
-      ).bind(conversationId).run();
-    }
+          // Signal start of stream
+          controller.enqueue(encoder.encode(formatSSE(JSON.stringify({ type: 'start', model: selectedModel }))));
 
-    return c.json({
-      content: text,
-      sources: MOCK_SOURCES,
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6);
+                if (data === '[DONE]') continue;
+
+                try {
+                  const parsed = JSON.parse(data);
+                  const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                  if (text) {
+                    fullText += text;
+                    controller.enqueue(encoder.encode(formatSSE(JSON.stringify({ type: 'token', content: text }))));
+                  }
+                } catch {
+                  // Skip malformed JSON
+                }
+              }
+            }
+          }
+
+          // Save assistant message to DB
+          if (conversationId && fullText) {
+            const msgId = crypto.randomUUID();
+            await c.env.DB.prepare(
+              'INSERT INTO messages (id, conversation_id, role, content, sources) VALUES (?, ?, ?, ?, ?)'
+            ).bind(msgId, conversationId, 'assistant', fullText, JSON.stringify(MOCK_SOURCES)).run();
+
+            await c.env.DB.prepare(
+              'UPDATE conversations SET updated_at = datetime("now") WHERE id = ?'
+            ).bind(conversationId).run();
+          }
+
+          // Send sources at the end
+          controller.enqueue(encoder.encode(formatSSE(JSON.stringify({ type: 'sources', sources: MOCK_SOURCES }))));
+
+          // Signal end of stream
+          controller.enqueue(encoder.encode(formatSSE('[DONE]')));
+          controller.close();
+        } catch (err) {
+          console.error('Stream error:', err);
+          controller.enqueue(encoder.encode(formatSSE(JSON.stringify({ type: 'error', message: err instanceof Error ? err.message : String(err) }))));
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+      },
     });
   } catch (err) {
     console.error('Chat error:', err);
