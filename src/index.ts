@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import type { Env } from './types';
 import conversations from './routes/conversations';
 import messages from './routes/messages';
+import rag from './routes/rag';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -21,6 +22,7 @@ app.get('/', (c) => {
 // Routes
 app.route('/api/conversations', conversations);
 app.route('/api/messages', messages);
+app.route('/api/rag', rag);
 
 // 404 handler
 app.notFound((c) => {

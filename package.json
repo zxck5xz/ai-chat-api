@@ -17,6 +17,7 @@
     ]
   },
   "dependencies": {
+    "@qdrant/js-client-rest": "^1.19.0",
     "hono": "^4.13.3"
   },
   "devDependencies": {
