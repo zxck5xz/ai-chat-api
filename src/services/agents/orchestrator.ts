@@ -2,7 +2,7 @@ import { PlannerAgent, type PlannerTask } from './planner-agent';
 import { DesignerAgent } from './designer-agent';
 import { CoderAgent } from './coder-agent';
 import { ReviewerAgent } from './reviewer-agent';
-import type { AgentTask, WorkflowRun, WorkflowEvent } from '../../types/agents';
+import type { AgentTask, WorkflowRun, WorkflowEvent, AgentType } from '../../types/agents';
 
 export interface OrchestratorConfig {
   apiKey: string;
@@ -133,7 +133,7 @@ export class Orchestrator {
         workflow.tasks.push(task);
 
         // Wait for approval if required (skip for planner)
-        if (this.requireApproval && plannedTask.agent !== 'planner') {
+        if (this.requireApproval && plannedTask.agent !== 'planner' as AgentType) {
           const approved = await this.waitForApproval(
             workflowId,
             task.id,

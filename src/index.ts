@@ -5,6 +5,8 @@ import conversations from './routes/conversations';
 import messages from './routes/messages';
 import rag from './routes/rag';
 import orchestrator from './routes/orchestrator';
+import eval_ from './routes/eval';
+import safety from './routes/safety';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -25,6 +27,8 @@ app.route('/api/conversations', conversations);
 app.route('/api/messages', messages);
 app.route('/api/rag', rag);
 app.route('/api/orchestrator', orchestrator);
+app.route('/api/eval', eval_);
+app.route('/api/safety', safety);
 
 // 404 handler
 app.notFound((c) => {
