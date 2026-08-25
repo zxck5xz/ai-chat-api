@@ -4,6 +4,7 @@ import type { Env } from './types';
 import conversations from './routes/conversations';
 import messages from './routes/messages';
 import rag from './routes/rag';
+import orchestrator from './routes/orchestrator';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -23,6 +24,7 @@ app.get('/', (c) => {
 app.route('/api/conversations', conversations);
 app.route('/api/messages', messages);
 app.route('/api/rag', rag);
+app.route('/api/orchestrator', orchestrator);
 
 // 404 handler
 app.notFound((c) => {

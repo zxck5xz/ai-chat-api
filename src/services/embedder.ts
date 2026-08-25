@@ -24,8 +24,8 @@ export async function embedText(
     throw new Error(`Embedding failed: ${response.status} - ${error}`);
   }
 
-  const result = await response.json();
-  return result.embedding.values;
+  const result = await response.json() as { embedding?: { values?: number[] } };
+  return result.embedding?.values || [];
 }
 
 export async function embedBatch(
