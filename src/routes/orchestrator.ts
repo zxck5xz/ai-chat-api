@@ -7,8 +7,8 @@ const orchestrator = new Hono<{ Bindings: Env }>();
 // Run a multi-agent workflow
 orchestrator.post('/run', async (c) => {
   try {
-    const body = await c.req.json<{ input: string }>();
-    const { input } = body;
+    const body = await c.req.json<{ input: string; requireApproval?: boolean }>();
+    const { input, requireApproval } = body;
 
     if (!input) {
       return c.json({ error: 'input is required' }, 400);
@@ -16,6 +16,7 @@ orchestrator.post('/run', async (c) => {
 
     const orchestratorInstance = new Orchestrator({
       apiKey: c.env.GEMINI_API_KEY,
+      requireApproval,
     });
 
     // SSE stream for workflow events
@@ -93,6 +94,42 @@ orchestrator.get('/agents', (c) => {
       },
     ],
   });
+});
+
+// Approve a pending task
+orchestrator.post('/approve', async (c) => {
+  try {
+    const body = await c.req.json<{ approvalId: string }>();
+    const { approvalId } = body;
+
+    if (!approvalId) {
+      return c.json({ error: 'approvalId is required' }, 400);
+    }
+
+    const approved = Orchestrator.approveTask(approvalId);
+    return c.json({ success: approved });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ error: 'Failed to approve', details: message }, 500);
+  }
+});
+
+// Reject a pending task
+orchestrator.post('/reject', async (c) => {
+  try {
+    const body = await c.req.json<{ approvalId: string }>();
+    const { approvalId } = body;
+
+    if (!approvalId) {
+      return c.json({ error: 'approvalId is required' }, 400);
+    }
+
+    const rejected = Orchestrator.rejectTask(approvalId);
+    return c.json({ success: rejected });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ error: 'Failed to reject', details: message }, 500);
+  }
 });
 
 export default orchestrator;

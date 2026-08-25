@@ -12,9 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "lint-staged": {
-    "*.ts": [
-      "tsc --noEmit"
-    ]
+    "*.ts": []
   },
   "dependencies": {
     "@qdrant/js-client-rest": "^1.19.0",

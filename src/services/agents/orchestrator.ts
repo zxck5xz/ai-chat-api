@@ -7,7 +7,17 @@ import type { AgentTask, WorkflowRun, WorkflowEvent } from '../../types/agents';
 export interface OrchestratorConfig {
   apiKey: string;
   model?: string;
+  requireApproval?: boolean;
 }
+
+// In-memory store for pending approvals (in production, use D1/KV)
+const pendingApprovals = new Map<string, {
+  workflowId: string;
+  taskId: string;
+  agent: string;
+  input: string;
+  resolve: (approved: boolean) => void;
+}>();
 
 export class Orchestrator {
   private planner: PlannerAgent;
@@ -15,14 +25,63 @@ export class Orchestrator {
   private coder: CoderAgent;
   private reviewer: ReviewerAgent;
   private model: string;
+  private requireApproval: boolean;
 
   constructor(config: OrchestratorConfig) {
     this.model = config.model || 'gemini-3.6-flash';
+    this.requireApproval = config.requireApproval ?? false;
     const agentConfig = { apiKey: config.apiKey, model: this.model };
     this.planner = new PlannerAgent(agentConfig);
     this.designer = new DesignerAgent(agentConfig);
     this.coder = new CoderAgent(agentConfig);
     this.reviewer = new ReviewerAgent(agentConfig);
+  }
+
+  static approveTask(approvalId: string): boolean {
+    const pending = pendingApprovals.get(approvalId);
+    if (pending) {
+      pending.resolve(true);
+      pendingApprovals.delete(approvalId);
+      return true;
+    }
+    return false;
+  }
+
+  static rejectTask(approvalId: string): boolean {
+    const pending = pendingApprovals.get(approvalId);
+    if (pending) {
+      pending.resolve(false);
+      pendingApprovals.delete(approvalId);
+      return true;
+    }
+    return false;
+  }
+
+  private waitForApproval(
+    workflowId: string,
+    taskId: string,
+    agent: string,
+    input: string,
+    onEvent: (event: WorkflowEvent) => void
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      const approvalId = crypto.randomUUID();
+      pendingApprovals.set(approvalId, {
+        workflowId,
+        taskId,
+        agent,
+        input,
+        resolve,
+      });
+
+      onEvent({
+        type: 'approval_needed',
+        approvalId,
+        taskId,
+        agent: agent as AgentType,
+        content: input,
+      });
+    });
   }
 
   async runWorkflow(
@@ -66,13 +125,33 @@ export class Orchestrator {
         const task: AgentTask = {
           id: plannedTask.id,
           agent: plannedTask.agent,
-          status: 'running',
+          status: 'pending',
           input: plannedTask.description,
           output: '',
           startedAt: new Date().toISOString(),
         };
         workflow.tasks.push(task);
 
+        // Wait for approval if required (skip for planner)
+        if (this.requireApproval && plannedTask.agent !== 'planner') {
+          const approved = await this.waitForApproval(
+            workflowId,
+            task.id,
+            task.agent,
+            task.input,
+            onEvent
+          );
+
+          if (!approved) {
+            task.status = 'failed';
+            task.error = 'Rejected by user';
+            task.completedAt = new Date().toISOString();
+            onEvent({ type: 'task_error', taskId: task.id, agent: task.agent, error: 'Rejected by user' });
+            continue;
+          }
+        }
+
+        task.status = 'running';
         onEvent({ type: 'task_start', taskId: task.id, agent: task.agent });
 
         let result: { success: boolean; output?: string; error?: string };

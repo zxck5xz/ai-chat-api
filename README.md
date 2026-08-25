@@ -1,6 +1,10 @@
 # AI Chat API
 
-Backend API cho AI Chat UI — built với **Hono** + **Cloudflare Workers** + **D1** + **Google Gemini**.
+Backend API cho AI Chat UI — built với **Hono** + **Cloudflare Workers** + **D1** + **Qdrant** + **Google Gemini**.
+
+## Live Demo
+
+🔗 **https://ai-chat-api.ai-chat-api.workers.dev**
 
 ## Tech Stack
 
@@ -9,7 +13,8 @@ Backend API cho AI Chat UI — built với **Hono** + **Cloudflare Workers** + *
 | Runtime | Cloudflare Workers | Edge serverless functions |
 | Framework | Hono | Lightweight web framework |
 | Database | Cloudflare D1 | Serverless SQLite |
-| AI | Google Gemini API | LLM inference (free tier) |
+| Vector DB | Qdrant | Vector search for RAG |
+| AI | Google Gemini API | LLM inference + embeddings |
 
 ## Architecture
 
@@ -18,7 +23,8 @@ Client (Next.js)
       ↓
 Cloudflare Workers (Hono)
       ├── D1 Database (conversations, messages)
-      └── Google Gemini API (AI responses)
+      ├── Qdrant (vector embeddings)
+      └── Google Gemini API (AI responses + embeddings)
 ```
 
 ## API Endpoints
@@ -43,7 +49,7 @@ Response: `{ "status": "ok", "service": "ai-chat-api" }`
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/messages/chat` | Send message & get AI response |
+| `POST` | `/api/messages/chat` | Send message & get AI response (SSE) |
 | `PUT` | `/api/messages/:id/feedback` | Update feedback (thumbs up/down) |
 
 #### POST `/api/messages/chat`
@@ -55,19 +61,61 @@ Response: `{ "status": "ok", "service": "ai-chat-api" }`
   "conversationId": "uuid-optional"
 }
 
-// Response
+// Response (SSE Stream)
+data: {"type": "token", "content": "Hello"}
+data: {"type": "token", "content": ", how"}
+data: {"type": "done"}
+```
+
+### RAG (Retrieval-Augmented Generation)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/rag/documents` | List uploaded documents |
+| `POST` | `/api/rag/documents` | Upload & embed document |
+| `DELETE` | `/api/rag/documents/:id` | Delete document |
+| `POST` | `/api/rag/query` | RAG query (SSE streaming) |
+
+#### POST `/api/rag/query`
+
+```json
+// Request
 {
-  "content": "AI response text...",
-  "sources": [
-    {
-      "id": "src-1",
-      "title": "Source title",
-      "url": "https://example.com",
-      "snippet": "Relevant excerpt",
-      "score": 0.95
-    }
-  ]
+  "query": "What is the main topic?",
+  "mode": "rag" | "chat"
 }
+
+// Response (SSE Stream)
+data: {"type": "token", "content": "Based on the documents..."}
+data: {"type": "sources", "sources": [{"title": "...", "score": 0.95}]}
+data: {"type": "done"}
+```
+
+### Multi-Agent Orchestrator
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/orchestrator/run` | Run multi-agent workflow (SSE) |
+| `GET` | `/api/orchestrator/agents` | List available agents |
+| `POST` | `/api/orchestrator/approve` | Approve pending task |
+| `POST` | `/api/orchestrator/reject` | Reject pending task |
+
+#### POST `/api/orchestrator/run`
+
+```json
+// Request
+{
+  "input": "Create a login form",
+  "requireApproval": true
+}
+
+// Response (SSE Stream)
+data: {"type": "task_start", "agent": "planner"}
+data: {"type": "task_complete", "agent": "planner", "content": "..."}
+data: {"type": "task_start", "taskId": "task-1", "agent": "designer"}
+data: {"type": "approval_needed", "approvalId": "uuid", "taskId": "task-1"}
+data: {"type": "workflow_complete"}
+data: {"type": "workflow_result", "workflow": {...}}
 ```
 
 ## Setup
@@ -77,6 +125,7 @@ Response: `{ "status": "ok", "service": "ai-chat-api" }`
 - Node.js 18+
 - Cloudflare account (free tier works)
 - Google Gemini API key ([get one here](https://aistudio.google.com/apikey))
+- Qdrant Cloud account ([get one here](https://qdrant.io))
 
 ### Installation
 
@@ -114,6 +163,12 @@ npm run db:init:remote
 ```bash
 npx wrangler secret put GEMINI_API_KEY
 # Paste your Gemini API key when prompted
+
+npx wrangler secret put QDRANT_URL
+# Paste your Qdrant URL when prompted
+
+npx wrangler secret put QDRANT_API_KEY
+# Paste your Qdrant API key when prompted
 ```
 
 ### Development
@@ -154,20 +209,35 @@ CREATE TABLE messages (
 
 ## Features
 
+### Chat
 - **AI Chat**: Proxy to Google Gemini API with system prompt
+- **Streaming SSE**: Token-by-token responses
 - **Conversation Management**: CRUD operations on conversations
 - **Message Persistence**: Save all messages to D1
 - **Feedback System**: Thumbs up/down on assistant messages
 - **Auto-retry**: Retry with fallback models on overload
-- **Auto-create**: Create conversation on first message
-- **CORS**: Configured for frontend integration
+
+### RAG (Retrieval-Augmented Generation)
+- **Document Upload**: Upload and embed documents
+- **Vector Search**: Qdrant for similarity search
+- **Gemini Embeddings**: text-embedding-004 (3072 dimensions)
+- **Streaming RAG**: Token-by-token with source citations
+
+### Multi-Agent Orchestrator
+- **Planner Agent**: Analyzes requests, breaks into tasks
+- **Designer Agent**: Creates design specs (layout, colors, typography)
+- **Coder Agent**: Generates React/TypeScript code
+- **Reviewer Agent**: Reviews code for accessibility, performance
+- **Human-in-the-loop**: Approve/reject tasks before execution
+- **Exponential Backoff**: Retry logic for rate limits (429)
 
 ## Models
 
-| Model | Priority | Notes |
-|-------|----------|-------|
-| `gemini-3.6-flash` | Primary | Latest, fastest |
+| Model | Purpose | Notes |
+|-------|---------|-------|
+| `gemini-3.6-flash` | Chat + Agents | Primary model |
 | `gemini-2.0-flash-lite` | Fallback | Lighter, more available |
+| `gemini-embedding-004` | Embeddings | 3072 dimensions |
 
 ## Free Tier Limits (Cloudflare Workers)
 
@@ -184,14 +254,29 @@ CREATE TABLE messages (
 ```
 ai-chat-api/
 ├── src/
-│   ├── index.ts              # Hono app + CORS + routes
-│   ├── types.ts              # TypeScript types
-│   └── routes/
-│       ├── conversations.ts  # Conversation CRUD
-│       └── messages.ts       # Chat + feedback
-├── schema.sql                # D1 database schema
-├── wrangler.toml             # Cloudflare Workers config
-├── .dev.vars                 # Local environment variables
+│   ├── index.ts                  # Hono app + CORS + routes
+│   ├── types.ts                  # TypeScript types
+│   ├── types/
+│   │   └── agents.ts             # Agent type definitions
+│   ├── routes/
+│   │   ├── conversations.ts      # Conversation CRUD
+│   │   ├── messages.ts           # Chat + feedback (SSE)
+│   │   ├── rag.ts                # RAG documents + query
+│   │   └── orchestrator.ts       # Multi-agent workflow
+│   └── services/
+│       ├── embedder.ts           # Gemini embeddings + chunking
+│       ├── qdrant.ts             # Qdrant vector DB
+│       └── agents/
+│           ├── base-agent.ts     # Base agent class
+│           ├── planner-agent.ts  # Planner agent
+│           ├── designer-agent.ts # Designer agent
+│           ├── coder-agent.ts    # Coder agent
+│           ├── reviewer-agent.ts # Reviewer agent
+│           ├── orchestrator.ts   # Workflow orchestration
+│           └── index.ts          # Agent exports
+├── schema.sql                    # D1 database schema
+├── wrangler.toml                 # Cloudflare Workers config
+├── .dev.vars                     # Local environment variables
 └── package.json
 ```
 
