@@ -22,7 +22,7 @@ Backend API cho AI Chat UI — built với **Hono** + **Cloudflare Workers** + *
 Client (Next.js)
       ↓
 Cloudflare Workers (Hono)
-      ├── D1 Database (conversations, messages)
+      ├── D1 Database (conversations, messages, eval, safety)
       ├── Qdrant (vector embeddings)
       └── Google Gemini API (AI responses + embeddings)
 ```
@@ -52,21 +52,6 @@ Response: `{ "status": "ok", "service": "ai-chat-api" }`
 | `POST` | `/api/messages/chat` | Send message & get AI response (SSE) |
 | `PUT` | `/api/messages/:id/feedback` | Update feedback (thumbs up/down) |
 
-#### POST `/api/messages/chat`
-
-```json
-// Request
-{
-  "messages": [{ "role": "user", "content": "Hello" }],
-  "conversationId": "uuid-optional"
-}
-
-// Response (SSE Stream)
-data: {"type": "token", "content": "Hello"}
-data: {"type": "token", "content": ", how"}
-data: {"type": "done"}
-```
-
 ### RAG (Retrieval-Augmented Generation)
 
 | Method | Endpoint | Description |
@@ -75,21 +60,6 @@ data: {"type": "done"}
 | `POST` | `/api/rag/documents` | Upload & embed document |
 | `DELETE` | `/api/rag/documents/:id` | Delete document |
 | `POST` | `/api/rag/query` | RAG query (SSE streaming) |
-
-#### POST `/api/rag/query`
-
-```json
-// Request
-{
-  "query": "What is the main topic?",
-  "mode": "rag" | "chat"
-}
-
-// Response (SSE Stream)
-data: {"type": "token", "content": "Based on the documents..."}
-data: {"type": "sources", "sources": [{"title": "...", "score": 0.95}]}
-data: {"type": "done"}
-```
 
 ### Multi-Agent Orchestrator
 
@@ -100,23 +70,31 @@ data: {"type": "done"}
 | `POST` | `/api/orchestrator/approve` | Approve pending task |
 | `POST` | `/api/orchestrator/reject` | Reject pending task |
 
-#### POST `/api/orchestrator/run`
+### Eval Dashboard
 
-```json
-// Request
-{
-  "input": "Create a login form",
-  "requireApproval": true
-}
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/eval/metrics` | Get aggregated metrics |
+| `GET` | `/api/eval/metrics/timeseries` | Get metrics time series |
+| `GET` | `/api/eval/runs` | List eval runs |
+| `POST` | `/api/eval/runs` | Create eval run |
+| `PUT` | `/api/eval/runs/:id/complete` | Complete eval run |
+| `GET` | `/api/eval/runs/:id/results` | Get run results |
+| `POST` | `/api/eval/runs/:id/results` | Add eval result |
+| `GET` | `/api/eval/failures` | Get failure cases |
+| `GET` | `/api/eval/models` | Get unique model versions |
 
-// Response (SSE Stream)
-data: {"type": "task_start", "agent": "planner"}
-data: {"type": "task_complete", "agent": "planner", "content": "..."}
-data: {"type": "task_start", "taskId": "task-1", "agent": "designer"}
-data: {"type": "approval_needed", "approvalId": "uuid", "taskId": "task-1"}
-data: {"type": "workflow_complete"}
-data: {"type": "workflow_result", "workflow": {...}}
-```
+### Safety Gates
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/safety/gates` | List safety gates |
+| `POST` | `/api/safety/gates` | Create safety gate |
+| `PUT` | `/api/safety/gates/:id` | Update safety gate |
+| `GET` | `/api/safety/check/:runId` | Check gates for eval run |
+| `GET` | `/api/safety/approvals` | List deploy approvals |
+| `POST` | `/api/safety/approvals` | Create approval request |
+| `PUT` | `/api/safety/approvals/:id` | Approve/Reject deploy |
 
 ## Setup
 
@@ -162,13 +140,8 @@ npm run db:init:remote
 
 ```bash
 npx wrangler secret put GEMINI_API_KEY
-# Paste your Gemini API key when prompted
-
 npx wrangler secret put QDRANT_URL
-# Paste your Qdrant URL when prompted
-
 npx wrangler secret put QDRANT_API_KEY
-# Paste your Qdrant API key when prompted
 ```
 
 ### Development
@@ -187,24 +160,20 @@ npm run deploy
 ## Database Schema
 
 ```sql
-CREATE TABLE conversations (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL DEFAULT 'New Chat',
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+-- Conversations & Messages
+CREATE TABLE conversations (id TEXT PRIMARY KEY, title TEXT, created_at TEXT, updated_at TEXT);
+CREATE TABLE messages (id TEXT PRIMARY KEY, conversation_id TEXT, role TEXT, content TEXT, sources TEXT, feedback_rating TEXT, feedback_comment TEXT, created_at TEXT);
 
-CREATE TABLE messages (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-  content TEXT NOT NULL,
-  sources TEXT,  -- JSON string
-  feedback_rating TEXT CHECK (feedback_rating IN ('positive', 'negative', NULL)),
-  feedback_comment TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);
+-- Documents for RAG
+CREATE TABLE documents (id TEXT PRIMARY KEY, title TEXT, url TEXT, chunk_count INTEGER, created_at TEXT);
+
+-- Eval Metrics
+CREATE TABLE eval_runs (id TEXT PRIMARY KEY, model_version TEXT, prompt_variant TEXT, status TEXT, total_cases INTEGER, passed_cases INTEGER, failed_cases INTEGER, avg_latency_ms REAL, avg_cost_usd REAL, started_at TEXT, completed_at TEXT);
+CREATE TABLE eval_results (id TEXT PRIMARY KEY, run_id TEXT, query TEXT, expected_output TEXT, actual_output TEXT, score REAL, passed INTEGER, latency_ms REAL, cost_usd REAL, feedback_rating TEXT, feedback_comment TEXT, hallucination_flag INTEGER, metadata TEXT, created_at TEXT);
+
+-- Safety Gates
+CREATE TABLE safety_gates (id TEXT PRIMARY KEY, name TEXT, metric TEXT, threshold REAL, enabled INTEGER, created_at TEXT);
+CREATE TABLE deploy_approvals (id TEXT PRIMARY KEY, eval_run_id TEXT, status TEXT, approved_by TEXT, comment TEXT, created_at TEXT, resolved_at TEXT);
 ```
 
 ## Features
@@ -231,6 +200,13 @@ CREATE TABLE messages (
 - **Human-in-the-loop**: Approve/reject tasks before execution
 - **Exponential Backoff**: Retry logic for rate limits (429)
 
+### Eval Dashboard
+- **Metrics Aggregation**: Accuracy, latency, cost, hallucination rate
+- **Time Series**: Metrics over time visualization
+- **Failure Cases**: Query, expected/actual output, feedback analysis
+- **Safety Gates**: Automatic deploy blocking if metrics degrade
+- **Deploy Approvals**: Human-in-the-loop deployment decisions
+
 ## Models
 
 | Model | Purpose | Notes |
@@ -238,16 +214,6 @@ CREATE TABLE messages (
 | `gemini-3.6-flash` | Chat + Agents | Primary model |
 | `gemini-2.0-flash-lite` | Fallback | Lighter, more available |
 | `gemini-embedding-004` | Embeddings | 3072 dimensions |
-
-## Free Tier Limits (Cloudflare Workers)
-
-| Resource | Limit |
-|----------|-------|
-| Requests | 100,000/day |
-| CPU time | 10ms/request |
-| D1 reads | 5M rows/day |
-| D1 writes | 100K rows/day |
-| D1 storage | 5 GB |
 
 ## Project Structure
 
@@ -257,12 +223,15 @@ ai-chat-api/
 │   ├── index.ts                  # Hono app + CORS + routes
 │   ├── types.ts                  # TypeScript types
 │   ├── types/
-│   │   └── agents.ts             # Agent type definitions
+│   │   ├── agents.ts             # Agent type definitions
+│   │   └── eval.ts               # Eval type definitions
 │   ├── routes/
 │   │   ├── conversations.ts      # Conversation CRUD
 │   │   ├── messages.ts           # Chat + feedback (SSE)
 │   │   ├── rag.ts                # RAG documents + query
-│   │   └── orchestrator.ts       # Multi-agent workflow
+│   │   ├── orchestrator.ts       # Multi-agent workflow
+│   │   ├── eval.ts               # Eval metrics + runs
+│   │   └── safety.ts             # Safety gates + approvals
 │   └── services/
 │       ├── embedder.ts           # Gemini embeddings + chunking
 │       ├── qdrant.ts             # Qdrant vector DB
