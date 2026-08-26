@@ -13,3 +13,5 @@ database_id = "ee6fe2cb-0284-4416-a849-3aed8ecc0717"
 # Environment variables (set via wrangler secret put OPENAI_API_KEY)
 # [vars]
 # OPENAI_API_KEY = ""
+# GITHUB_TOKEN = ""
+# GITHUB_WEBHOOK_SECRET = ""

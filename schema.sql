@@ -94,3 +94,32 @@ CREATE TABLE IF NOT EXISTS deploy_approvals (
 );
 
 CREATE INDEX IF NOT EXISTS idx_deploy_approvals_status ON deploy_approvals(status);
+
+-- Code Review Bot
+CREATE TABLE IF NOT EXISTS code_reviews (
+  id TEXT PRIMARY KEY,
+  pr_number INTEGER NOT NULL,
+  repo TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed')),
+  total_issues INTEGER NOT NULL DEFAULT 0,
+  issues_by_severity TEXT, -- JSON string: {"critical": 1, "warning": 2, "info": 5}
+  latency_ms REAL,
+  cost_usd REAL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_reviews_repo_pr ON code_reviews(repo, pr_number);
+
+CREATE TABLE IF NOT EXISTS code_review_issues (
+  id TEXT PRIMARY KEY,
+  review_id TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  line_number INTEGER NOT NULL,
+  severity TEXT NOT NULL CHECK (severity IN ('critical', 'warning', 'info')),
+  message TEXT NOT NULL,
+  suggestion TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (review_id) REFERENCES code_reviews(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_review_issues_review ON code_review_issues(review_id);
