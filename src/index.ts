@@ -8,6 +8,7 @@ import orchestrator from './routes/orchestrator';
 import eval_ from './routes/eval';
 import safety from './routes/safety';
 import codeReview from './routes/code-review';
+import hybridSearch from './routes/hybrid-search';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -31,6 +32,7 @@ app.route('/api/orchestrator', orchestrator);
 app.route('/api/eval', eval_);
 app.route('/api/safety', safety);
 app.route('/api/code-review', codeReview);
+app.route('/api/hybrid', hybridSearch);
 
 // 404 handler
 app.notFound((c) => {

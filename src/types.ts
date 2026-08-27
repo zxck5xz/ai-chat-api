@@ -3,6 +3,7 @@ export interface Env {
   GEMINI_API_KEY: string;
   QDRANT_URL: string;
   QDRANT_API_KEY: string;
+  COHERE_API_KEY?: string;
 }
 
 export interface Conversation {
