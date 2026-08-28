@@ -61,6 +61,22 @@ Response: `{ "status": "ok", "service": "ai-chat-api" }`
 | `DELETE` | `/api/rag/documents/:id` | Delete document |
 | `POST` | `/api/rag/query` | RAG query (SSE streaming) |
 
+### Hybrid Search (Custom RAG)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/hybrid/documents` | Upload document with chunking strategy |
+| `POST` | `/api/hybrid/search` | Hybrid search (BM25 + Vector + re-ranking) |
+| `POST` | `/api/hybrid/query` | Full RAG query with hybrid search (SSE) |
+| `POST` | `/api/hybrid/compare` | Compare search methods (vector vs BM25 vs hybrid) |
+| `POST` | `/api/hybrid/evaluate` | Evaluate search quality with metrics |
+| `POST` | `/api/hybrid/chunk` | Preview chunking strategies |
+| `POST` | `/api/hybrid/ab-test` | Create A/B test |
+| `POST` | `/api/hybrid/ab-test/:id/start` | Start A/B test |
+| `POST` | `/api/hybrid/ab-test/:id/record` | Record A/B test result |
+| `GET` | `/api/hybrid/ab-test/:id/summary` | Get A/B test summary |
+| `GET` | `/api/hybrid/stats` | Get index statistics |
+
 ### Multi-Agent Orchestrator
 
 | Method | Endpoint | Description |
@@ -70,31 +86,24 @@ Response: `{ "status": "ok", "service": "ai-chat-api" }`
 | `POST` | `/api/orchestrator/approve` | Approve pending task |
 | `POST` | `/api/orchestrator/reject` | Reject pending task |
 
-### Eval Dashboard
+### Code Review Bot
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/eval/metrics` | Get aggregated metrics |
-| `GET` | `/api/eval/metrics/timeseries` | Get metrics time series |
-| `GET` | `/api/eval/runs` | List eval runs |
-| `POST` | `/api/eval/runs` | Create eval run |
-| `PUT` | `/api/eval/runs/:id/complete` | Complete eval run |
-| `GET` | `/api/eval/runs/:id/results` | Get run results |
-| `POST` | `/api/eval/runs/:id/results` | Add eval result |
-| `GET` | `/api/eval/failures` | Get failure cases |
-| `GET` | `/api/eval/models` | Get unique model versions |
+| `POST` | `/api/code-review/webhook` | GitHub webhook endpoint |
+| `GET` | `/api/code-review/reviews` | List all reviews |
+| `GET` | `/api/code-review/reviews/:id` | Get review detail |
+| `GET` | `/api/code-review/metrics` | Get review metrics |
+| `POST` | `/api/code-review/analyze` | Manual PR analysis |
 
-### Safety Gates
+### Tool Agent (Function Calling)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/safety/gates` | List safety gates |
-| `POST` | `/api/safety/gates` | Create safety gate |
-| `PUT` | `/api/safety/gates/:id` | Update safety gate |
-| `GET` | `/api/safety/check/:runId` | Check gates for eval run |
-| `GET` | `/api/safety/approvals` | List deploy approvals |
-| `POST` | `/api/safety/approvals` | Create approval request |
-| `PUT` | `/api/safety/approvals/:id` | Approve/Reject deploy |
+| `POST` | `/api/tool-agent/run` | Run agent query with tools (SSE) |
+| `GET` | `/api/tool-agent/tools` | List available tools |
+| `GET` | `/api/tool-agent/runs` | Get recent agent runs |
+| `GET` | `/api/tool-agent/runs/:id` | Get specific run detail |
 
 ## Setup
 
@@ -192,6 +201,14 @@ CREATE TABLE deploy_approvals (id TEXT PRIMARY KEY, eval_run_id TEXT, status TEX
 - **Gemini Embeddings**: text-embedding-004 (3072 dimensions)
 - **Streaming RAG**: Token-by-token with source citations
 
+### Hybrid Search (Custom RAG)
+- **BM25 Keyword Search**: Okapi BM25 algorithm for term-based retrieval
+- **Hybrid Search**: Combines BM25 + Vector search with fusion methods (RRF, weighted, CombMNZ)
+- **Re-ranking**: Cohere API + local fallback for improved relevance
+- **Chunking Strategies**: Fixed, recursive, semantic, document-aware
+- **Evaluation Metrics**: Recall@k, MRR, Precision@k, NDCG, context relevance, faithfulness
+- **A/B Testing**: Framework for testing prompts, chunking strategies, and search configs
+
 ### Multi-Agent Orchestrator
 - **Planner Agent**: Analyzes requests, breaks into tasks
 - **Designer Agent**: Creates design specs (layout, colors, typography)
@@ -206,6 +223,14 @@ CREATE TABLE deploy_approvals (id TEXT PRIMARY KEY, eval_run_id TEXT, status TEX
 - **Failure Cases**: Query, expected/actual output, feedback analysis
 - **Safety Gates**: Automatic deploy blocking if metrics degrade
 - **Deploy Approvals**: Human-in-the-loop deployment decisions
+
+### Tool Agent (Function Calling)
+- **Gemini Function Calling**: Structured tool definitions with JSON Schema
+- **ReAct Reasoning Loop**: Multi-step reasoning with tool execution
+- **4 Built-in Tools**: Web search (Jina), HTTP request, calculator, get current time
+- **Agent Memory**: Conversation history preserved across reasoning steps
+- **SSE Streaming**: Real-time streaming of reasoning steps and tool execution
+- **Run History**: Track and query past agent runs
 
 ## Models
 
@@ -224,17 +249,33 @@ ai-chat-api/
 │   ├── types.ts                  # TypeScript types
 │   ├── types/
 │   │   ├── agents.ts             # Agent type definitions
-│   │   └── eval.ts               # Eval type definitions
+│   │   ├── eval.ts               # Eval type definitions
+│   │   └── code-review.ts        # Code review types
 │   ├── routes/
 │   │   ├── conversations.ts      # Conversation CRUD
 │   │   ├── messages.ts           # Chat + feedback (SSE)
 │   │   ├── rag.ts                # RAG documents + query
+│   │   ├── hybrid-search.ts      # Hybrid search + chunking + eval + A/B
 │   │   ├── orchestrator.ts       # Multi-agent workflow
 │   │   ├── eval.ts               # Eval metrics + runs
-│   │   └── safety.ts             # Safety gates + approvals
+│   │   ├── safety.ts             # Safety gates + approvals
+│   │   ├── code-review.ts        # AI code review bot
+│   │   └── tool-agent.ts         # Tool agent (function calling)
 │   └── services/
 │       ├── embedder.ts           # Gemini embeddings + chunking
 │       ├── qdrant.ts             # Qdrant vector DB
+│       ├── bm25.ts               # BM25 keyword search
+│       ├── hybrid-search.ts      # Hybrid search (BM25 + Vector)
+│       ├── reranker.ts           # Re-ranking (Cohere + local)
+│       ├── chunking.ts           # Chunking strategies
+│       ├── eval-metrics.ts       # Evaluation metrics
+│       ├── ab-testing.ts         # A/B testing framework
+│       ├── github.ts             # GitHub API integration
+│       ├── code-review-agent.ts  # Code review AI agent
+│       ├── tool-agent/
+│       │   ├── tools.ts          # Tool definitions + registry
+│       │   ├── tool-agent.ts     # Agent with function calling + ReAct loop
+│       │   └── index.ts          # Service exports
 │       └── agents/
 │           ├── base-agent.ts     # Base agent class
 │           ├── planner-agent.ts  # Planner agent

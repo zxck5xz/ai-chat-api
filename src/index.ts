@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from './types';
+import { authMiddleware } from './middleware/auth';
 import conversations from './routes/conversations';
 import messages from './routes/messages';
 import rag from './routes/rag';
@@ -9,6 +10,9 @@ import eval_ from './routes/eval';
 import safety from './routes/safety';
 import codeReview from './routes/code-review';
 import hybridSearch from './routes/hybrid-search';
+import toolAgent from './routes/tool-agent';
+import observability from './routes/observability';
+import fineTuning from './routes/fine-tuning';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -16,10 +20,17 @@ const app = new Hono<{ Bindings: Env }>();
 app.use('*', cors({
   origin: '*',
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
 }));
 
-// Health check
+// Auth middleware - skip if no API_KEY configured
+app.use('*', async (c, next) => {
+  const apiKey = c.env.API_KEY;
+  if (!apiKey) return next();
+  return authMiddleware(apiKey)(c, next);
+});
+
+// Health check (always public)
 app.get('/', (c) => {
   return c.json({ status: 'ok', service: 'ai-chat-api' });
 });
@@ -33,6 +44,9 @@ app.route('/api/eval', eval_);
 app.route('/api/safety', safety);
 app.route('/api/code-review', codeReview);
 app.route('/api/hybrid', hybridSearch);
+app.route('/api/tool-agent', toolAgent);
+app.route('/api/observability', observability);
+app.route('/api/fine-tuning', fineTuning);
 
 // 404 handler
 app.notFound((c) => {
