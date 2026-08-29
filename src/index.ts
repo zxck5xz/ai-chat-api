@@ -13,6 +13,7 @@ import hybridSearch from './routes/hybrid-search';
 import toolAgent from './routes/tool-agent';
 import observability from './routes/observability';
 import fineTuning from './routes/fine-tuning';
+import voiceAgent from './routes/voice-agent';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -47,6 +48,7 @@ app.route('/api/hybrid', hybridSearch);
 app.route('/api/tool-agent', toolAgent);
 app.route('/api/observability', observability);
 app.route('/api/fine-tuning', fineTuning);
+app.route('/api/voice-agent', voiceAgent);
 
 // 404 handler
 app.notFound((c) => {

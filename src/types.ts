@@ -5,6 +5,10 @@ export interface Env {
   QDRANT_API_KEY: string;
   COHERE_API_KEY?: string;
   API_KEY?: string;
+  OPENAI_API_KEY?: string;
+  ELEVENLABS_API_KEY?: string;
+  VOICE_LANGUAGE?: string;
+  VOICE_ID?: string;
 }
 
 export interface Conversation {

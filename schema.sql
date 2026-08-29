@@ -308,3 +308,21 @@ CREATE TABLE IF NOT EXISTS ft_ab_tests (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ft_ab_status ON ft_ab_tests(status);
+
+-- Voice Sessions
+CREATE TABLE IF NOT EXISTS voice_sessions (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL CHECK (status IN ('listening', 'processing', 'speaking', 'completed', 'failed', 'interrupted')),
+  transcript TEXT NOT NULL DEFAULT '[]',
+  user_language TEXT NOT NULL DEFAULT 'en',
+  total_turns INTEGER NOT NULL DEFAULT 0,
+  total_input_tokens INTEGER NOT NULL DEFAULT 0,
+  total_output_tokens INTEGER NOT NULL DEFAULT 0,
+  total_cost_usd REAL NOT NULL DEFAULT 0,
+  total_latency_ms REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_status ON voice_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_date ON voice_sessions(created_at);
