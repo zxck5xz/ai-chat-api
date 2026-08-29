@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
-import { VoiceAgent } from '../services/voice-agent';
+import { VoiceAgent, getActiveAgent } from '../services/voice-agent';
 
 const voiceAgent = new Hono<{ Bindings: Env }>();
 
@@ -52,6 +52,19 @@ voiceAgent.post('/synthesize', async (c) => {
     const message = error instanceof Error ? error.message : 'Synthesis failed';
     return c.json({ success: false, error: message }, 500);
   }
+});
+
+// POST /interrupt - Interrupt an active voice session
+voiceAgent.post('/interrupt', async (c) => {
+  const body = await c.req.json<{ sessionId: string }>();
+  const agent = getActiveAgent(body.sessionId);
+
+  if (!agent) {
+    return c.json({ success: false, error: 'Session not found or already completed' }, 404);
+  }
+
+  agent.interrupt();
+  return c.json({ success: true, message: 'Interrupt signal sent' });
 });
 
 // POST /run - Full pipeline with SSE streaming

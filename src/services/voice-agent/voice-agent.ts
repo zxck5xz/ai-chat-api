@@ -17,6 +17,17 @@ interface VoiceAgentDeps {
   db?: D1Database;
 }
 
+// In-memory store for active agent sessions (keyed by sessionId)
+const activeSessions = new Map<string, VoiceAgent>();
+
+export function getActiveAgent(sessionId: string): VoiceAgent | undefined {
+  return activeSessions.get(sessionId);
+}
+
+export function removeActiveAgent(sessionId: string): void {
+  activeSessions.delete(sessionId);
+}
+
 export class VoiceAgent {
   private stt: STTService;
   private tts: TTSProvider;
@@ -24,6 +35,7 @@ export class VoiceAgent {
   private db?: D1Database;
   private config: VoiceAgentConfig;
   private isInterrupted = false;
+  private abortController: AbortController | null = null;
 
   constructor(deps: VoiceAgentDeps, config?: Partial<VoiceAgentConfig>) {
     this.geminiApiKey = deps.geminiApiKey;
@@ -55,6 +67,11 @@ export class VoiceAgent {
 
   interrupt() {
     this.isInterrupted = true;
+    this.abortController?.abort();
+  }
+
+  getAbortSignal(): AbortSignal | undefined {
+    return this.abortController?.signal;
   }
 
   async run(
@@ -65,6 +82,8 @@ export class VoiceAgent {
     const sessionId = crypto.randomUUID();
     const startTime = Date.now();
     this.isInterrupted = false;
+    this.abortController = new AbortController();
+    activeSessions.set(sessionId, this);
 
     onEvent({ type: 'session_started', sessionId });
 
@@ -79,6 +98,7 @@ export class VoiceAgent {
 
       if (this.isInterrupted) {
         onEvent({ type: 'interrupted', atStep: 'transcribe' });
+        activeSessions.delete(sessionId);
         return this.buildSession(sessionId, transcript, 'interrupted', startTime);
       }
 
@@ -99,6 +119,7 @@ export class VoiceAgent {
 
       if (this.isInterrupted) {
         onEvent({ type: 'interrupted', atStep: 'llm' });
+        activeSessions.delete(sessionId);
         return this.buildSession(sessionId, transcript, 'interrupted', startTime);
       }
 
@@ -121,6 +142,7 @@ export class VoiceAgent {
 
       if (this.isInterrupted) {
         onEvent({ type: 'interrupted', atStep: 'synthesize' });
+        activeSessions.delete(sessionId);
         return this.buildSession(sessionId, transcript, 'interrupted', startTime);
       }
 
@@ -144,10 +166,12 @@ export class VoiceAgent {
         await this.saveSession(session);
       }
 
+      activeSessions.delete(sessionId);
       return session;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       onEvent({ type: 'error', message: errorMessage });
+      activeSessions.delete(sessionId);
       return this.buildSession(sessionId, transcript, 'failed', startTime);
     }
   }
@@ -160,6 +184,8 @@ export class VoiceAgent {
     const sessionId = crypto.randomUUID();
     const startTime = Date.now();
     this.isInterrupted = false;
+    this.abortController = new AbortController();
+    activeSessions.set(sessionId, this);
 
     onEvent({ type: 'session_started', sessionId });
 
@@ -174,6 +200,7 @@ export class VoiceAgent {
 
       if (this.isInterrupted) {
         onEvent({ type: 'interrupted', atStep: 'transcribe' });
+        activeSessions.delete(sessionId);
         return this.buildSession(sessionId, transcript, 'interrupted', startTime);
       }
 
@@ -196,6 +223,7 @@ export class VoiceAgent {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: this.abortController?.signal,
           body: JSON.stringify({
             contents: [
               ...conversationHistory.map((entry) => ({
@@ -255,6 +283,7 @@ export class VoiceAgent {
 
       if (this.isInterrupted) {
         onEvent({ type: 'interrupted', atStep: 'llm' });
+        activeSessions.delete(sessionId);
         return this.buildSession(sessionId, transcript, 'interrupted', startTime);
       }
 
@@ -284,6 +313,7 @@ export class VoiceAgent {
 
       if (this.isInterrupted) {
         onEvent({ type: 'interrupted', atStep: 'synthesize' });
+        activeSessions.delete(sessionId);
         return this.buildSession(sessionId, transcript, 'interrupted', startTime);
       }
 
@@ -300,10 +330,12 @@ export class VoiceAgent {
         await this.saveSession(session);
       }
 
+      activeSessions.delete(sessionId);
       return session;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       onEvent({ type: 'error', message: errorMessage });
+      activeSessions.delete(sessionId);
       return this.buildSession(sessionId, transcript, 'failed', startTime);
     }
   }
@@ -322,6 +354,7 @@ export class VoiceAgent {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: this.abortController?.signal,
         body: JSON.stringify({
           contents: history,
           generationConfig: {

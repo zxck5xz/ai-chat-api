@@ -14,6 +14,8 @@ import toolAgent from './routes/tool-agent';
 import observability from './routes/observability';
 import fineTuning from './routes/fine-tuning';
 import voiceAgent from './routes/voice-agent';
+import multiModal from './routes/multi-modal';
+import queryUnderstanding from './routes/query-understanding';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -49,6 +51,8 @@ app.route('/api/tool-agent', toolAgent);
 app.route('/api/observability', observability);
 app.route('/api/fine-tuning', fineTuning);
 app.route('/api/voice-agent', voiceAgent);
+app.route('/api/multi-modal', multiModal);
+app.route('/api/query', queryUnderstanding);
 
 // 404 handler
 app.notFound((c) => {
