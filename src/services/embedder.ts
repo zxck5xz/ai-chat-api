@@ -1,3 +1,5 @@
+import { getEmbeddingCache } from './cache/embedding-cache';
+
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const MODEL = 'gemini-embedding-001';
 
@@ -5,6 +7,14 @@ export async function embedText(
   apiKey: string,
   text: string
 ): Promise<number[]> {
+  const cache = getEmbeddingCache();
+  const { value } = await cache.getOrCompute(text, () =>
+    fetchEmbedding(apiKey, text)
+  );
+  return value;
+}
+
+async function fetchEmbedding(apiKey: string, text: string): Promise<number[]> {
   const response = await fetch(
     `${GEMINI_API_URL}/models/${MODEL}:embedContent?key=${apiKey}`,
     {

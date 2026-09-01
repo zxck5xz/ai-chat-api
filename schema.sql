@@ -181,7 +181,7 @@ CREATE INDEX IF NOT EXISTS idx_trace_spans_trace ON trace_spans(trace_id);
 CREATE INDEX IF NOT EXISTS idx_trace_spans_model ON trace_spans(model);
 CREATE INDEX IF NOT EXISTS idx_trace_spans_date ON trace_spans(started_at);
 
--- Observability: Alert Rules
+-- Observability: Alert Rules (enhanced)
 CREATE TABLE IF NOT EXISTS alert_rules (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -189,6 +189,10 @@ CREATE TABLE IF NOT EXISTS alert_rules (
   condition TEXT NOT NULL CHECK (condition IN ('gt', 'lt', 'eq')),
   threshold REAL NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
+  severity TEXT NOT NULL DEFAULT 'warning' CHECK (severity IN ('info', 'warning', 'critical')),
+  evaluation_window_minutes INTEGER NOT NULL DEFAULT 5,
+  cooldown_minutes INTEGER NOT NULL DEFAULT 15,
+  last_evaluated_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -206,6 +210,60 @@ CREATE TABLE IF NOT EXISTS alert_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_alert_events_ack ON alert_events(acknowledged);
+
+-- Monitoring: Anomaly Events
+CREATE TABLE IF NOT EXISTS anomaly_events (
+  id TEXT PRIMARY KEY,
+  metric TEXT NOT NULL,
+  model TEXT,
+  anomaly_type TEXT NOT NULL CHECK (anomaly_type IN ('spike', 'drop', 'drift', 'outlier')),
+  severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')),
+  actual_value REAL NOT NULL,
+  expected_min REAL,
+  expected_max REAL,
+  z_score REAL,
+  description TEXT NOT NULL,
+  acknowledged INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_anomaly_events_metric ON anomaly_events(metric);
+CREATE INDEX IF NOT EXISTS idx_anomaly_events_ack ON anomaly_events(acknowledged);
+CREATE INDEX IF NOT EXISTS idx_anomaly_events_date ON anomaly_events(created_at);
+
+-- Monitoring: Drift Events
+CREATE TABLE IF NOT EXISTS drift_events (
+  id TEXT PRIMARY KEY,
+  metric TEXT NOT NULL,
+  model TEXT,
+  drift_type TEXT NOT NULL CHECK (drift_type IN ('accuracy', 'cost', 'latency', 'quality')),
+  direction TEXT NOT NULL CHECK (direction IN ('improving', 'degrading')),
+  baseline_value REAL NOT NULL,
+  current_value REAL NOT NULL,
+  change_pct REAL NOT NULL,
+  window_days INTEGER NOT NULL DEFAULT 7,
+  description TEXT NOT NULL,
+  acknowledged INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_drift_events_metric ON drift_events(metric);
+CREATE INDEX IF NOT EXISTS idx_drift_events_ack ON drift_events(acknowledged);
+CREATE INDEX IF NOT EXISTS idx_drift_events_date ON drift_events(created_at);
+
+-- Monitoring: Metric Snapshots (periodic metric recordings for trend analysis)
+CREATE TABLE IF NOT EXISTS metric_snapshots (
+  id TEXT PRIMARY KEY,
+  metric TEXT NOT NULL,
+  model TEXT,
+  value REAL NOT NULL,
+  sample_count INTEGER NOT NULL DEFAULT 0,
+  window_minutes INTEGER NOT NULL DEFAULT 5,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_metric_snapshots_metric ON metric_snapshots(metric);
+CREATE INDEX IF NOT EXISTS idx_metric_snapshots_date ON metric_snapshots(created_at);
 
 -- Fine-tuning: Datasets
 CREATE TABLE IF NOT EXISTS ft_datasets (
@@ -326,3 +384,111 @@ CREATE TABLE IF NOT EXISTS voice_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_voice_sessions_status ON voice_sessions(status);
 CREATE INDEX IF NOT EXISTS idx_voice_sessions_date ON voice_sessions(created_at);
+
+-- Image Text Replacement
+CREATE TABLE IF NOT EXISTS image_text_replacements (
+  id TEXT PRIMARY KEY,
+  image_base64_hash TEXT NOT NULL,
+  regions_detected INTEGER NOT NULL DEFAULT 0,
+  regions_replaced INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL CHECK (status IN ('detecting', 'editing', 'generating', 'completed', 'failed')),
+  model TEXT NOT NULL DEFAULT 'gemini-2.0-flash-exp',
+  latency_ms REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_itr_status ON image_text_replacements(status);
+CREATE INDEX IF NOT EXISTS idx_itr_date ON image_text_replacements(created_at);
+
+-- Search Engine Analytics
+CREATE TABLE IF NOT EXISTS search_queries (
+  id TEXT PRIMARY KEY,
+  query TEXT NOT NULL,
+  expanded_query TEXT,
+  complexity TEXT NOT NULL CHECK (complexity IN ('simple', 'moderate', 'complex', 'ambiguous')),
+  strategy TEXT NOT NULL,
+  results_count INTEGER NOT NULL DEFAULT 0,
+  clicked_result_id TEXT,
+  clicked_position INTEGER,
+  latency_ms REAL NOT NULL DEFAULT 0,
+  has_click INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_queries_date ON search_queries(created_at);
+CREATE INDEX IF NOT EXISTS idx_search_queries_complexity ON search_queries(complexity);
+CREATE INDEX IF NOT EXISTS idx_search_queries_query ON search_queries(query);
+
+CREATE TABLE IF NOT EXISTS search_clicks (
+  id TEXT PRIMARY KEY,
+  query_id TEXT NOT NULL,
+  result_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  document_id TEXT,
+  chunk_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (query_id) REFERENCES search_queries(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_clicks_query ON search_clicks(query_id);
+CREATE INDEX IF NOT EXISTS idx_search_clicks_position ON search_clicks(position);
+
+CREATE TABLE IF NOT EXISTS search_feedback (
+  id TEXT PRIMARY KEY,
+  query_id TEXT NOT NULL,
+  rating TEXT NOT NULL CHECK (rating IN ('positive', 'negative')),
+  comment TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (query_id) REFERENCES search_queries(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_feedback_query ON search_feedback(query_id);
+CREATE INDEX IF NOT EXISTS idx_search_feedback_rating ON search_feedback(rating);
+
+-- MCP Server: connected remote MCP servers (we act as MCP client)
+CREATE TABLE IF NOT EXISTS connected_mcp_servers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  auth_token_hash TEXT NOT NULL,
+  protocol_version TEXT NOT NULL DEFAULT '2024-11-05',
+  server_info TEXT,
+  status TEXT NOT NULL CHECK (status IN ('connected', 'error', 'disconnected')),
+  last_error TEXT,
+  last_seen_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_status ON connected_mcp_servers(status);
+
+-- Catalog of tools advertised by remote MCP servers
+CREATE TABLE IF NOT EXISTS remote_mcp_tools (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  input_schema TEXT NOT NULL DEFAULT '{}',
+  cached_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (server_id) REFERENCES connected_mcp_servers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_tools_server ON remote_mcp_tools(server_id);
+
+-- Audit log for every call to a remote MCP server
+CREATE TABLE IF NOT EXISTS mcp_call_log (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  args_json TEXT NOT NULL DEFAULT '{}',
+  result_summary TEXT,
+  latency_ms REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL CHECK (status IN ('ok', 'error')),
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (server_id) REFERENCES connected_mcp_servers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_call_log_server ON mcp_call_log(server_id);
+CREATE INDEX IF NOT EXISTS idx_mcp_call_log_tool ON mcp_call_log(tool_name);
+CREATE INDEX IF NOT EXISTS idx_mcp_call_log_date ON mcp_call_log(created_at);

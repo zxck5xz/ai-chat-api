@@ -66,7 +66,8 @@ Response: `{ "status": "ok", "service": "ai-chat-api" }`
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/hybrid/documents` | Upload document with chunking strategy |
-| `POST` | `/api/hybrid/search` | Hybrid search (BM25 + Vector + re-ranking) |
+| `POST` | `/api/hybrid/search` | Hybrid search (BM25 + Vector + re-ranking). Supports `parallel: true` for concurrent BM25 + vector retrieval with normalized fusion. Response includes `rerankProvider` (`cohere` / `bge` / `local`). |
+| `POST` | `/api/hybrid/parallel-search` | Dedicated parallel BM25 + Vector search (concurrent, min-max normalized fusion) with optional re-ranking. Returns per-signal scores + `latencyMs`. |
 | `POST` | `/api/hybrid/query` | Full RAG query with hybrid search (SSE) |
 | `POST` | `/api/hybrid/compare` | Compare search methods (vector vs BM25 vs hybrid) |
 | `POST` | `/api/hybrid/evaluate` | Evaluate search quality with metrics |
@@ -76,6 +77,27 @@ Response: `{ "status": "ok", "service": "ai-chat-api" }`
 | `POST` | `/api/hybrid/ab-test/:id/record` | Record A/B test result |
 | `GET` | `/api/hybrid/ab-test/:id/summary` | Get A/B test summary |
 | `GET` | `/api/hybrid/stats` | Get index statistics |
+| `GET` | `/api/hybrid/cache/stats` | Embedding cache stats (hits / misses / evictions / expirations / size / hitRate) |
+| `POST` | `/api/hybrid/cache/clear` | Clear embedding cache |
+
+### Query Understanding
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/query/classify` | Classify query complexity (simple / moderate / complex / ambiguous) |
+| `POST` | `/api/query/expand` | Expand query (HyDE / multi-query / decomposition / step-back) |
+| `POST` | `/api/query/rewrite` | Rewrite conversational query (pronoun resolution + chat history injection) |
+| `POST` | `/api/query/process` | Full pipeline: rewrite → classify → expand |
+
+### Search Analytics
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/search/analytics/record-query` | Persist a search query (complexity, strategy, results count, latency) |
+| `POST` | `/api/search/analytics/record-click` | Track a click on a result (queryId, resultId, position) |
+| `POST` | `/api/search/analytics/record-feedback` | Store thumbs rating (positive / negative + comment) |
+| `GET` | `/api/search/analytics/metrics` | Aggregate CTR, MRR, zero-click rate, queries by complexity, top / worst queries, clicks by position |
+| `GET` | `/api/search/analytics/queries` | List recent search queries (supports `?limit=N`) |
 
 ### Multi-Agent Orchestrator
 
@@ -104,6 +126,28 @@ Response: `{ "status": "ok", "service": "ai-chat-api" }`
 | `GET` | `/api/tool-agent/tools` | List available tools |
 | `GET` | `/api/tool-agent/runs` | Get recent agent runs |
 | `GET` | `/api/tool-agent/runs/:id` | Get specific run detail |
+
+### Production Monitoring
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/monitoring/overview` | System health, anomaly/drift stats |
+| `POST` | `/api/monitoring/evaluate` | Run full evaluation pipeline (snapshots → alerts → anomalies → drifts) |
+| `GET` | `/api/monitoring/anomalies` | List anomaly events |
+| `GET` | `/api/monitoring/anomalies/stats` | Anomaly statistics by severity/type |
+| `POST` | `/api/monitoring/anomalies/detect` | Detect anomalies for a metric |
+| `PUT` | `/api/monitoring/anomalies/:id/acknowledge` | Acknowledge anomaly |
+| `GET` | `/api/monitoring/drifts` | List drift events |
+| `GET` | `/api/monitoring/drifts/stats` | Drift statistics |
+| `POST` | `/api/monitoring/drifts/detect` | Detect drifts (latency/cost/error/accuracy) |
+| `PUT` | `/api/monitoring/drifts/:id/acknowledge` | Acknowledge drift |
+| `GET` | `/api/monitoring/rules` | List alert rules (enhanced) |
+| `POST` | `/api/monitoring/rules` | Create alert rule (severity, cooldown, window) |
+| `PUT` | `/api/monitoring/rules/:id/toggle` | Enable/disable rule |
+| `DELETE` | `/api/monitoring/rules/:id` | Delete rule |
+| `GET` | `/api/monitoring/snapshots` | Metric snapshots (time series) |
+| `GET` | `/api/monitoring/events` | Alert events |
+| `PUT` | `/api/monitoring/events/:id/acknowledge` | Acknowledge alert event |
 
 ## Setup
 
@@ -232,6 +276,14 @@ CREATE TABLE deploy_approvals (id TEXT PRIMARY KEY, eval_run_id TEXT, status TEX
 - **SSE Streaming**: Real-time streaming of reasoning steps and tool execution
 - **Run History**: Track and query past agent runs
 
+### Production Monitoring
+- **Anomaly Detection**: Z-score analysis, spike detection via moving average comparison
+- **Drift Detection**: Latency, cost, error rate, and accuracy drift monitoring (baseline vs current)
+- **Alerting**: Configurable rules with severity (info/warning/critical), evaluation window, cooldown period
+- **Metric Snapshots**: Periodic recording for trend analysis
+- **Evaluation Pipeline**: One-click full evaluation (snapshots → alerts → anomaly → drift)
+- **System Health**: Real-time health status (healthy/degraded/critical)
+
 ## Models
 
 | Model | Purpose | Notes |
@@ -250,7 +302,8 @@ ai-chat-api/
 │   ├── types/
 │   │   ├── agents.ts             # Agent type definitions
 │   │   ├── eval.ts               # Eval type definitions
-│   │   └── code-review.ts        # Code review types
+│   │   ├── code-review.ts        # Code review types
+│   │   └── observability.ts      # Observability + monitoring types
 │   ├── routes/
 │   │   ├── conversations.ts      # Conversation CRUD
 │   │   ├── messages.ts           # Chat + feedback (SSE)
@@ -260,7 +313,9 @@ ai-chat-api/
 │   │   ├── eval.ts               # Eval metrics + runs
 │   │   ├── safety.ts             # Safety gates + approvals
 │   │   ├── code-review.ts        # AI code review bot
-│   │   └── tool-agent.ts         # Tool agent (function calling)
+│   │   ├── tool-agent.ts         # Tool agent (function calling)
+│   │   ├── observability.ts      # Traces, cost, latency, alerts
+│   │   └── monitoring.ts         # Anomaly, drift, alert evaluation
 │   └── services/
 │       ├── embedder.ts           # Gemini embeddings + chunking
 │       ├── qdrant.ts             # Qdrant vector DB
@@ -275,6 +330,14 @@ ai-chat-api/
 │       ├── tool-agent/
 │       │   ├── tools.ts          # Tool definitions + registry
 │       │   ├── tool-agent.ts     # Agent with function calling + ReAct loop
+│       │   └── index.ts          # Service exports
+│       ├── observability/
+│       │   ├── tracer.ts         # Request tracing
+│       │   ├── cost-tracker.ts   # Cost tracking per model
+│       │   ├── latency-profiler.ts # Latency percentiles
+│       │   ├── anomaly-detector.ts # Z-score + spike detection
+│       │   ├── drift-detector.ts # Latency/cost/error/accuracy drift
+│       │   ├── alert-evaluator.ts # Rule evaluation + cooldown
 │       │   └── index.ts          # Service exports
 │       └── agents/
 │           ├── base-agent.ts     # Base agent class

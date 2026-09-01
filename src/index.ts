@@ -16,6 +16,9 @@ import fineTuning from './routes/fine-tuning';
 import voiceAgent from './routes/voice-agent';
 import multiModal from './routes/multi-modal';
 import queryUnderstanding from './routes/query-understanding';
+import imageText from './routes/image-text-replacement';
+import searchAnalytics from './routes/search/analytics';
+import monitoring from './routes/monitoring';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -53,6 +56,9 @@ app.route('/api/fine-tuning', fineTuning);
 app.route('/api/voice-agent', voiceAgent);
 app.route('/api/multi-modal', multiModal);
 app.route('/api/query', queryUnderstanding);
+app.route('/api/image-text', imageText);
+app.route('/api/search/analytics', searchAnalytics);
+app.route('/api/monitoring', monitoring);
 
 // 404 handler
 app.notFound((c) => {

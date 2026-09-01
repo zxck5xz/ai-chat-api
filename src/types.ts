@@ -9,6 +9,8 @@ export interface Env {
   ELEVENLABS_API_KEY?: string;
   VOICE_LANGUAGE?: string;
   VOICE_ID?: string;
+  GITHUB_TOKEN?: string;
+  MCP_API_KEY?: string;
 }
 
 export interface Conversation {

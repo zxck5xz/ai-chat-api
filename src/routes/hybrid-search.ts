@@ -14,6 +14,7 @@ import {
 import { embedText, chunkText } from '../services/embedder';
 import { BM25Index, tokenize } from '../services/bm25';
 import { HybridSearch, type HybridSearchConfig } from '../services/hybrid-search';
+import { ParallelRetrieval } from '../services/parallel-retrieval';
 import { rerank, Reranker } from '../services/reranker';
 import {
   chunkDocument,
@@ -34,6 +35,7 @@ import {
   type ABTestConfig,
   type ABVariant,
 } from '../services/ab-testing';
+import { getEmbeddingCache } from '../services/cache/embedding-cache';
 
 const hybridSearch = new Hono<{ Bindings: Env }>();
 
@@ -164,6 +166,7 @@ hybridSearch.post('/search', async (c) => {
       hybridConfig?: Partial<HybridSearchConfig>;
       rerankResults?: boolean;
       cohereApiKey?: string;
+      parallel?: boolean;
     }>();
 
     const {
@@ -173,6 +176,7 @@ hybridSearch.post('/search', async (c) => {
       hybridConfig,
       rerankResults = false,
       cohereApiKey,
+      parallel = false,
     } = body;
 
     if (!query) {
@@ -253,11 +257,39 @@ hybridSearch.post('/search', async (c) => {
       }
     }
 
+    // Parallel retrieval (BM25 + Vector) — when requested and method is hybrid
+    if (parallel && searchMethod === 'hybrid') {
+      const retriever = new ParallelRetrieval(qdrant, 'ai-chat-documents');
+      const parallelResults = await retriever.search(
+        query,
+        c.env.GEMINI_API_KEY,
+        bm25Index!,
+        {
+          vectorTopK: hybridConfig?.vectorTopK || 20,
+          bm25TopK: hybridConfig?.bm25TopK || 20,
+          vectorWeight: hybridConfig?.vectorWeight || 0.6,
+          bm25Weight: hybridConfig?.bm25Weight || 0.4,
+        }
+      );
+
+      results = parallelResults.map((r) => ({
+        id: r.id,
+        content: r.content,
+        documentId: r.documentId,
+        documentTitle: r.documentTitle,
+        documentUrl: r.documentUrl,
+        chunkIndex: r.chunkIndex,
+        score: r.combinedScore,
+        searchMethod: 'parallel',
+      }));
+    }
+
     // Sort by score and take top K
     results.sort((a, b) => b.score - a.score);
     results = results.slice(0, topK);
 
     // Apply re-ranking if requested
+    let rerankProvider: 'cohere' | 'bge' | 'local' | undefined;
     if (rerankResults && results.length > 0) {
       const reranker = new Reranker(cohereApiKey || c.env.COHERE_API_KEY, {
         topN: topK,
@@ -270,6 +302,7 @@ hybridSearch.post('/search', async (c) => {
 
       // Re-order results based on reranking
       const rerankedMap = new Map(reranked.map((r) => [r.id, r]));
+      rerankProvider = reranked[0]?.provider;
       results = results
         .map((r) => ({
           ...r,
@@ -283,6 +316,7 @@ hybridSearch.post('/search', async (c) => {
       searchMethod,
       results,
       totalResults: results.length,
+      rerankProvider,
     });
   } catch (err) {
     console.error('Hybrid search error:', err);
@@ -902,6 +936,107 @@ hybridSearch.get('/stats', async (c) => {
     bm25: bm25Index?.getStats() || { totalDocuments: 0, averageDocLength: 0, uniqueTerms: 0 },
     collection: 'ai-chat-documents',
   });
+});
+
+/**
+ * GET /hybrid/cache/stats — embedding cache statistics
+ */
+hybridSearch.get('/cache/stats', async (c) => {
+  return c.json({ stats: getEmbeddingCache().getStats() });
+});
+
+/**
+ * POST /hybrid/cache/clear — clear embedding cache
+ */
+hybridSearch.post('/cache/clear', async (c) => {
+  getEmbeddingCache().clear();
+  return c.json({ success: true, stats: getEmbeddingCache().getStats() });
+});
+
+/**
+ * POST /hybrid/parallel-search
+ * Run BM25 and vector search concurrently with normalized score fusion.
+ */
+hybridSearch.post('/parallel-search', async (c) => {
+  try {
+    const body = await c.req.json<{
+      query: string;
+      topK?: number;
+      vectorTopK?: number;
+      bm25TopK?: number;
+      vectorWeight?: number;
+      bm25Weight?: number;
+      rerankResults?: boolean;
+      cohereApiKey?: string;
+    }>();
+
+    const {
+      query,
+      topK = 10,
+      vectorTopK = 20,
+      bm25TopK = 20,
+      vectorWeight = 0.6,
+      bm25Weight = 0.4,
+      rerankResults = false,
+      cohereApiKey,
+    } = body;
+
+    if (!query) {
+      return c.json({ error: 'query is required' }, 400);
+    }
+
+    const qdrant = createQdrantClient(c.env.QDRANT_URL, c.env.QDRANT_API_KEY);
+    await ensureCollection(qdrant);
+
+    if (!bm25Index) {
+      await buildBM25Index(qdrant);
+    }
+
+    const startedAt = Date.now();
+    const retriever = new ParallelRetrieval(qdrant, 'ai-chat-documents');
+    const merged = await retriever.search(query, c.env.GEMINI_API_KEY, bm25Index!, {
+      vectorTopK,
+      bm25TopK,
+      vectorWeight,
+      bm25Weight,
+    });
+
+    let results = merged.slice(0, topK);
+
+    if (rerankResults && results.length > 0) {
+      const reranker = new Reranker(cohereApiKey || c.env.COHERE_API_KEY, { topN: topK });
+      const reranked = await reranker.rerank(
+        query,
+        results.map((r) => ({ id: r.id, content: r.content }))
+      );
+      const map = new Map(reranked.map((r) => [r.id, r]));
+      results = results
+        .map((r) => ({ ...r, combinedScore: map.get(r.id)?.relevanceScore ?? r.combinedScore }))
+        .sort((a, b) => b.combinedScore - a.combinedScore);
+    }
+
+    return c.json({
+      query,
+      searchMethod: 'parallel',
+      results: results.map((r) => ({
+        id: r.id,
+        content: r.content,
+        documentId: r.documentId,
+        documentTitle: r.documentTitle,
+        documentUrl: r.documentUrl,
+        chunkIndex: r.chunkIndex,
+        score: r.combinedScore,
+        vectorScore: r.vectorScore,
+        bm25Score: r.bm25Score,
+      })),
+      totalResults: results.length,
+      latencyMs: Date.now() - startedAt,
+    });
+  } catch (err) {
+    console.error('Parallel search error:', err);
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ error: 'Parallel search failed', details: message }, 500);
+  }
 });
 
 export default hybridSearch;

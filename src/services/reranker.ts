@@ -1,13 +1,18 @@
 /**
  * Re-ranker Service
- * Improves search results quality using cross-encoder scoring
- * Supports Cohere Rerank API and local cross-encoder fallback
+ * Improves search results quality using cross-encoder scoring.
+ * Supports Cohere Rerank API (v3.5 default) and BGE local cross-encoder via HTTP.
+ * Falls back to a local token-overlap heuristic when no API is available.
  */
 
+export type RerankerProvider = 'cohere' | 'bge' | 'local';
+
 export interface RerankerConfig {
-  provider: 'cohere' | 'local';
+  provider: RerankerProvider;
   model: string;
   topN: number;
+  /** URL of the local cross-encoder server (e.g. text-embeddings-inference / BGE). */
+  bgeEndpoint?: string;
 }
 
 export interface RerankerResult {
@@ -15,6 +20,7 @@ export interface RerankerResult {
   index: number;
   relevanceScore: number;
   content: string;
+  provider: RerankerProvider;
 }
 
 export interface RerankableDocument {
@@ -25,7 +31,7 @@ export interface RerankableDocument {
 
 const DEFAULT_CONFIG: RerankerConfig = {
   provider: 'cohere',
-  model: 'rerank-english-v3.0',
+  model: 'rerank-english-v3.5',
   topN: 5,
 };
 
@@ -73,14 +79,54 @@ async function cohereRerank(
     index: r.index,
     relevanceScore: r.relevance_score,
     content: r.document?.text || documents[r.index]?.content || '',
+    provider: 'cohere',
   }));
 }
 
 /**
- * Local cross-encoder scoring using token overlap heuristic
- * Fallback when Cohere API is not available
+ * BGE cross-encoder via a local HTTP endpoint (e.g. text-embeddings-inference).
+ * Expects a POST with { query, texts: string[] } returning [{ index, score }].
  */
-function localRerank(
+async function bgeRerank(
+  endpoint: string,
+  query: string,
+  documents: RerankableDocument[],
+  config: Partial<RerankerConfig> = {}
+): Promise<RerankerResult[]> {
+  const cfg = { ...DEFAULT_CONFIG, ...config };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query,
+      texts: documents.map((d) => d.content),
+      truncate_if_too_long: true,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`BGE rerank failed: ${response.status} - ${error}`);
+  }
+
+  const result = await response.json() as Array<{ index: number; score: number }>;
+  const sorted = [...result].sort((a, b) => b.score - a.score).slice(0, cfg.topN);
+
+  return sorted.map((r) => ({
+    id: documents[r.index]?.id || '',
+    index: r.index,
+    relevanceScore: r.score,
+    content: documents[r.index]?.content || '',
+    provider: 'bge',
+  }));
+}
+
+/**
+ * Local cross-encoder scoring using token overlap heuristic.
+ * Fallback when no external API is available. Exported for unit testing.
+ */
+export function localRerank(
   query: string,
   documents: RerankableDocument[],
   topN: number
@@ -126,6 +172,7 @@ function localRerank(
       index: documents.indexOf(doc),
       relevanceScore: score,
       content: doc.content,
+      provider: 'local' as RerankerProvider,
     };
   });
 
@@ -135,7 +182,9 @@ function localRerank(
 }
 
 /**
- * Re-rank search results
+ * Re-rank search results.
+ * - `apiKey` is used for Cohere.
+ * - `config.bgeEndpoint` selects the local BGE server when provider === 'bge'.
  */
 export async function rerank(
   apiKey: string | undefined,
@@ -145,7 +194,6 @@ export async function rerank(
 ): Promise<RerankerResult[]> {
   const cfg = { ...DEFAULT_CONFIG, ...config };
 
-  // Use Cohere if API key is provided
   if (cfg.provider === 'cohere' && apiKey) {
     try {
       return await cohereRerank(apiKey, query, documents, config);
@@ -155,12 +203,20 @@ export async function rerank(
     }
   }
 
-  // Fallback to local reranking
+  if (cfg.provider === 'bge' && cfg.bgeEndpoint) {
+    try {
+      return await bgeRerank(cfg.bgeEndpoint, query, documents, config);
+    } catch (err) {
+      console.error('BGE rerank failed, falling back to local:', err);
+      return localRerank(query, documents, cfg.topN);
+    }
+  }
+
   return localRerank(query, documents, cfg.topN);
 }
 
 /**
- * Re-ranker class for persistent use
+ * Re-ranker class for persistent use.
  */
 export class Reranker {
   private config: RerankerConfig;
