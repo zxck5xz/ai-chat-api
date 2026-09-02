@@ -19,6 +19,8 @@ import queryUnderstanding from './routes/query-understanding';
 import imageText from './routes/image-text-replacement';
 import searchAnalytics from './routes/search/analytics';
 import monitoring from './routes/monitoring';
+import mcp from './routes/mcp';
+import modelVersioning from './routes/model-versioning';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -59,6 +61,8 @@ app.route('/api/query', queryUnderstanding);
 app.route('/api/image-text', imageText);
 app.route('/api/search/analytics', searchAnalytics);
 app.route('/api/monitoring', monitoring);
+app.route('/api/mcp', mcp);
+app.route('/api/model-versioning', modelVersioning);
 
 // 404 handler
 app.notFound((c) => {

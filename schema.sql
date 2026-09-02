@@ -492,3 +492,82 @@ CREATE TABLE IF NOT EXISTS mcp_call_log (
 CREATE INDEX IF NOT EXISTS idx_mcp_call_log_server ON mcp_call_log(server_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_call_log_tool ON mcp_call_log(tool_name);
 CREATE INDEX IF NOT EXISTS idx_mcp_call_log_date ON mcp_call_log(created_at);
+
+-- Model Versioning: Versions
+CREATE TABLE IF NOT EXISTS model_versions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  version TEXT NOT NULL,
+  provider TEXT NOT NULL CHECK (provider IN ('gemini', 'openai', 'anthropic', 'custom')),
+  model_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'inactive', 'deprecated', 'archived')),
+  config TEXT NOT NULL DEFAULT '{}',
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_model_versions_provider ON model_versions(provider);
+CREATE INDEX IF NOT EXISTS idx_model_versions_status ON model_versions(status);
+CREATE INDEX IF NOT EXISTS idx_model_versions_model ON model_versions(model_id);
+
+-- Model Versioning: Deployments
+CREATE TABLE IF NOT EXISTS model_deployments (
+  id TEXT PRIMARY KEY,
+  version_id TEXT NOT NULL,
+  environment TEXT NOT NULL CHECK (environment IN ('production', 'staging', 'canary')),
+  status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'rolled_back', 'failed')),
+  traffic_percent INTEGER NOT NULL DEFAULT 100,
+  strategy TEXT NOT NULL CHECK (strategy IN ('rolling', 'canary', 'blue_green', 'instant')),
+  deployed_at TEXT,
+  rolled_back_at TEXT,
+  rollback_reason TEXT,
+  deployed_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (version_id) REFERENCES model_versions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_model_deployments_env ON model_deployments(environment);
+CREATE INDEX IF NOT EXISTS idx_model_deployments_status ON model_deployments(status);
+CREATE INDEX IF NOT EXISTS idx_model_deployments_version ON model_deployments(version_id);
+
+-- Model Versioning: Rollbacks
+CREATE TABLE IF NOT EXISTS model_rollbacks (
+  id TEXT PRIMARY KEY,
+  deployment_id TEXT NOT NULL,
+  from_version_id TEXT NOT NULL,
+  to_version_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  triggered_by TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed')),
+  rolled_back_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (deployment_id) REFERENCES model_deployments(id) ON DELETE CASCADE,
+  FOREIGN KEY (from_version_id) REFERENCES model_versions(id),
+  FOREIGN KEY (to_version_id) REFERENCES model_versions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_model_rollbacks_deployment ON model_rollbacks(deployment_id);
+CREATE INDEX IF NOT EXISTS idx_model_rollbacks_status ON model_rollbacks(status);
+CREATE INDEX IF NOT EXISTS idx_model_rollbacks_date ON model_rollbacks(created_at);
+
+-- Model Versioning: Request Log (for metrics)
+CREATE TABLE IF NOT EXISTS model_requests (
+  id TEXT PRIMARY KEY,
+  version_id TEXT NOT NULL,
+  deployment_id TEXT,
+  status TEXT NOT NULL CHECK (status IN ('ok', 'error', 'timeout')),
+  latency_ms REAL NOT NULL DEFAULT 0,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (version_id) REFERENCES model_versions(id),
+  FOREIGN KEY (deployment_id) REFERENCES model_deployments(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_model_requests_version ON model_requests(version_id);
+CREATE INDEX IF NOT EXISTS idx_model_requests_deployment ON model_requests(deployment_id);
+CREATE INDEX IF NOT EXISTS idx_model_requests_status ON model_requests(status);
+CREATE INDEX IF NOT EXISTS idx_model_requests_date ON model_requests(created_at);
