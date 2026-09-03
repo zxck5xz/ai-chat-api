@@ -21,6 +21,7 @@ import searchAnalytics from './routes/search/analytics';
 import monitoring from './routes/monitoring';
 import mcp from './routes/mcp';
 import modelVersioning from './routes/model-versioning';
+import multiModalRAG from './routes/multi-modal-rag';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -63,6 +64,7 @@ app.route('/api/search/analytics', searchAnalytics);
 app.route('/api/monitoring', monitoring);
 app.route('/api/mcp', mcp);
 app.route('/api/model-versioning', modelVersioning);
+app.route('/api/multi-modal-rag', multiModalRAG);
 
 // 404 handler
 app.notFound((c) => {

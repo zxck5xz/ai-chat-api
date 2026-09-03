@@ -571,3 +571,31 @@ CREATE INDEX IF NOT EXISTS idx_model_requests_version ON model_requests(version_
 CREATE INDEX IF NOT EXISTS idx_model_requests_deployment ON model_requests(deployment_id);
 CREATE INDEX IF NOT EXISTS idx_model_requests_status ON model_requests(status);
 CREATE INDEX IF NOT EXISTS idx_model_requests_date ON model_requests(created_at);
+
+-- Multi-Modal RAG: Documents
+CREATE TABLE IF NOT EXISTS multi_modal_documents (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('image', 'text', 'mixed')),
+  content TEXT NOT NULL,
+  image_url TEXT,
+  mime_type TEXT,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_mm_docs_type ON multi_modal_documents(type);
+CREATE INDEX IF NOT EXISTS idx_mm_docs_date ON multi_modal_documents(created_at);
+
+-- Multi-Modal RAG: Search Analytics
+CREATE TABLE IF NOT EXISTS multi_modal_searches (
+  id TEXT PRIMARY KEY,
+  query TEXT NOT NULL,
+  search_type TEXT NOT NULL,
+  results_count INTEGER NOT NULL DEFAULT 0,
+  latency_ms REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_mm_searches_type ON multi_modal_searches(search_type);
+CREATE INDEX IF NOT EXISTS idx_mm_searches_date ON multi_modal_searches(created_at);
