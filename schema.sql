@@ -599,3 +599,33 @@ CREATE TABLE IF NOT EXISTS multi_modal_searches (
 
 CREATE INDEX IF NOT EXISTS idx_mm_searches_type ON multi_modal_searches(search_type);
 CREATE INDEX IF NOT EXISTS idx_mm_searches_date ON multi_modal_searches(created_at);
+
+-- LangGraph: Checkpoints for durable execution
+CREATE TABLE IF NOT EXISTS langgraph_checkpoints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  node_id TEXT NOT NULL,
+  timestamp INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_lg_checkpoints_thread ON langgraph_checkpoints(thread_id);
+CREATE INDEX IF NOT EXISTS idx_lg_checkpoints_ts ON langgraph_checkpoints(timestamp);
+
+-- LangGraph: Human-in-the-loop approvals
+CREATE TABLE IF NOT EXISTS langgraph_approvals (
+  id TEXT PRIMARY KEY,
+  thread_id TEXT NOT NULL,
+  node_id TEXT NOT NULL,
+  description TEXT NOT NULL,
+  state_snapshot TEXT NOT NULL,
+  options TEXT,
+  created_at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  responded_at INTEGER,
+  response TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_lg_approvals_thread ON langgraph_approvals(thread_id);
+CREATE INDEX IF NOT EXISTS idx_lg_approvals_status ON langgraph_approvals(status);
