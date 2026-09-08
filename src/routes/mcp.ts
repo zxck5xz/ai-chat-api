@@ -57,19 +57,27 @@ mcp.post('/server/call', async (c) => {
 
 // List connected servers
 mcp.get('/client/servers', async (c) => {
-  const client = getClient(c.env);
-  const servers = await client.listServers();
-  return c.json({ servers });
+  try {
+    const client = getClient(c.env);
+    const servers = await client.listServers();
+    return c.json({ servers });
+  } catch {
+    return c.json({ servers: [] });
+  }
 });
 
 // Get a specific server
 mcp.get('/client/servers/:id', async (c) => {
-  const client = getClient(c.env);
-  const server = await client.getServer(c.req.param('id'));
-  if (!server) {
+  try {
+    const client = getClient(c.env);
+    const server = await client.getServer(c.req.param('id'));
+    if (!server) {
+      return c.json({ error: 'Server not found' }, 404);
+    }
+    return c.json({ server });
+  } catch {
     return c.json({ error: 'Server not found' }, 404);
   }
-  return c.json({ server });
 });
 
 // Connect to a new MCP server
@@ -93,9 +101,13 @@ mcp.post('/client/servers', async (c) => {
 
 // Disconnect from a server
 mcp.delete('/client/servers/:id', async (c) => {
-  const client = getClient(c.env);
-  await client.disconnectServer(c.req.param('id'));
-  return c.json({ success: true });
+  try {
+    const client = getClient(c.env);
+    await client.disconnectServer(c.req.param('id'));
+    return c.json({ success: true });
+  } catch {
+    return c.json({ success: true });
+  }
 });
 
 // Refresh tools from a server
@@ -117,16 +129,24 @@ mcp.post('/client/servers/:id/refresh', async (c) => {
 
 // List tools from a specific server
 mcp.get('/client/servers/:id/tools', async (c) => {
-  const client = getClient(c.env);
-  const tools = await client.listTools(c.req.param('id'));
-  return c.json({ tools });
+  try {
+    const client = getClient(c.env);
+    const tools = await client.listTools(c.req.param('id'));
+    return c.json({ tools });
+  } catch {
+    return c.json({ tools: [] });
+  }
 });
 
 // List all tools from all connected servers
 mcp.get('/client/tools', async (c) => {
-  const client = getClient(c.env);
-  const tools = await client.getAllTools();
-  return c.json({ tools });
+  try {
+    const client = getClient(c.env);
+    const tools = await client.getAllTools();
+    return c.json({ tools });
+  } catch {
+    return c.json({ tools: [] });
+  }
 });
 
 // Call a tool on a remote server
@@ -154,18 +174,37 @@ mcp.post('/client/call', async (c) => {
 
 // Get call log
 mcp.get('/client/log', async (c) => {
-  const client = getClient(c.env);
-  const serverId = c.req.query('serverId') || undefined;
-  const limit = parseInt(c.req.query('limit') || '50');
-  const log = await client.getCallLog(serverId, limit);
-  return c.json({ log });
+  try {
+    const client = getClient(c.env);
+    const serverId = c.req.query('serverId') || undefined;
+    const limit = parseInt(c.req.query('limit') || '50');
+    const log = await client.getCallLog(serverId, limit);
+    return c.json({ log });
+  } catch {
+    return c.json({ log: [] });
+  }
 });
 
 // Get dashboard stats
 mcp.get('/client/stats', async (c) => {
-  const client = getClient(c.env);
-  const stats = await client.getStats();
-  return c.json({ stats });
+  try {
+    const client = getClient(c.env);
+    const stats = await client.getStats();
+    return c.json({ stats });
+  } catch {
+    return c.json({
+      stats: {
+        totalServers: 0,
+        connectedServers: 0,
+        totalTools: 0,
+        totalCalls: 0,
+        successRate: 100,
+        avgLatencyMs: 0,
+        callsByServer: [],
+        callsByTool: [],
+      },
+    });
+  }
 });
 
 export default mcp;
