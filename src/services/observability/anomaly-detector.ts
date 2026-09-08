@@ -219,11 +219,15 @@ export class AnomalyDetector {
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = params.limit || 50;
 
-    const results = await this.db.prepare(`
-      SELECT * FROM anomaly_events ${where} ORDER BY created_at DESC LIMIT ?
-    `).bind(...binds, limit).all<AnomalyEvent>();
+    try {
+      const results = await this.db.prepare(`
+        SELECT * FROM anomaly_events ${where} ORDER BY created_at DESC LIMIT ?
+      `).bind(...binds, limit).all<AnomalyEvent>();
 
-    return results.results;
+      return results.results;
+    } catch {
+      return [];
+    }
   }
 
   async acknowledgeAnomaly(id: string): Promise<void> {
@@ -237,27 +241,33 @@ export class AnomalyDetector {
     byMetric: Record<string, number>;
     unacknowledged: number;
   }> {
-    const rows = await this.db.prepare(`
-      SELECT * FROM anomaly_events WHERE created_at >= datetime('now', '-${days} days')
-    `).all<AnomalyEvent>();
+    const empty = { total: 0, bySeverity: {}, byType: {}, byMetric: {}, unacknowledged: 0 };
 
-    const events = rows.results;
-    const bySeverity: Record<string, number> = {};
-    const byType: Record<string, number> = {};
-    const byMetric: Record<string, number> = {};
+    try {
+      const rows = await this.db.prepare(`
+        SELECT * FROM anomaly_events WHERE created_at >= datetime('now', '-${days} days')
+      `).all<AnomalyEvent>();
 
-    for (const e of events) {
-      bySeverity[e.severity] = (bySeverity[e.severity] || 0) + 1;
-      byType[e.anomaly_type] = (byType[e.anomaly_type] || 0) + 1;
-      byMetric[e.metric] = (byMetric[e.metric] || 0) + 1;
+      const events = rows.results;
+      const bySeverity: Record<string, number> = {};
+      const byType: Record<string, number> = {};
+      const byMetric: Record<string, number> = {};
+
+      for (const e of events) {
+        bySeverity[e.severity] = (bySeverity[e.severity] || 0) + 1;
+        byType[e.anomaly_type] = (byType[e.anomaly_type] || 0) + 1;
+        byMetric[e.metric] = (byMetric[e.metric] || 0) + 1;
+      }
+
+      return {
+        total: events.length,
+        bySeverity,
+        byType,
+        byMetric,
+        unacknowledged: events.filter((e) => !e.acknowledged).length,
+      };
+    } catch {
+      return empty;
     }
-
-    return {
-      total: events.length,
-      bySeverity,
-      byType,
-      byMetric,
-      unacknowledged: events.filter((e) => !e.acknowledged).length,
-    };
   }
 }

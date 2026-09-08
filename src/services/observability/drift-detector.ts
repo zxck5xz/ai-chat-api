@@ -225,11 +225,15 @@ export class DriftDetector {
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = params.limit || 50;
 
-    const results = await this.db.prepare(`
-      SELECT * FROM drift_events ${where} ORDER BY created_at DESC LIMIT ?
-    `).bind(...binds, limit).all<DriftEvent>();
+    try {
+      const results = await this.db.prepare(`
+        SELECT * FROM drift_events ${where} ORDER BY created_at DESC LIMIT ?
+      `).bind(...binds, limit).all<DriftEvent>();
 
-    return results.results;
+      return results.results;
+    } catch {
+      return [];
+    }
   }
 
   async acknowledgeDrift(id: string): Promise<void> {
@@ -243,23 +247,29 @@ export class DriftDetector {
     byType: Record<string, number>;
     unacknowledged: number;
   }> {
-    const rows = await this.db.prepare(`
-      SELECT * FROM drift_events WHERE created_at >= datetime('now', '-${days} days')
-    `).all<DriftEvent>();
+    const empty = { total: 0, degrading: 0, improving: 0, byType: {}, unacknowledged: 0 };
 
-    const events = rows.results;
-    const byType: Record<string, number> = {};
+    try {
+      const rows = await this.db.prepare(`
+        SELECT * FROM drift_events WHERE created_at >= datetime('now', '-${days} days')
+      `).all<DriftEvent>();
 
-    for (const e of events) {
-      byType[e.drift_type] = (byType[e.drift_type] || 0) + 1;
+      const events = rows.results;
+      const byType: Record<string, number> = {};
+
+      for (const e of events) {
+        byType[e.drift_type] = (byType[e.drift_type] || 0) + 1;
+      }
+
+      return {
+        total: events.length,
+        degrading: events.filter((e) => e.direction === 'degrading').length,
+        improving: events.filter((e) => e.direction === 'improving').length,
+        byType,
+        unacknowledged: events.filter((e) => !e.acknowledged).length,
+      };
+    } catch {
+      return empty;
     }
-
-    return {
-      total: events.length,
-      degrading: events.filter((e) => e.direction === 'degrading').length,
-      improving: events.filter((e) => e.direction === 'improving').length,
-      byType,
-      unacknowledged: events.filter((e) => !e.acknowledged).length,
-    };
   }
 }
