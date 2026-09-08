@@ -141,22 +141,26 @@ multiModalRAG.post('/search', async (c) => {
 
 // GET /documents - List indexed documents
 multiModalRAG.get('/documents', async (c) => {
-  const limit = parseInt(c.req.query('limit') || '50');
-  const offset = parseInt(c.req.query('offset') || '0');
+  try {
+    const limit = parseInt(c.req.query('limit') || '50');
+    const offset = parseInt(c.req.query('offset') || '0');
 
-  const result = await c.env.DB.prepare(
-    'SELECT * FROM multi_modal_documents ORDER BY created_at DESC LIMIT ? OFFSET ?'
-  ).bind(limit, offset).all();
+    const result = await c.env.DB.prepare(
+      'SELECT * FROM multi_modal_documents ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    ).bind(limit, offset).all();
 
-  const countResult = await c.env.DB.prepare(
-    'SELECT COUNT(*) as total FROM multi_modal_documents'
-  ).first();
+    const countResult = await c.env.DB.prepare(
+      'SELECT COUNT(*) as total FROM multi_modal_documents'
+    ).first();
 
-  return c.json({
-    success: true,
-    documents: result.results,
-    total: countResult?.total || 0,
-  });
+    return c.json({
+      success: true,
+      documents: result.results,
+      total: countResult?.total || 0,
+    });
+  } catch {
+    return c.json({ success: true, documents: [], total: 0 });
+  }
 });
 
 // DELETE /documents/:id - Delete a document
@@ -172,32 +176,43 @@ multiModalRAG.delete('/documents/:id', async (c) => {
 
 // GET /metrics - Usage metrics
 multiModalRAG.get('/metrics', async (c) => {
-  const docCount = await c.env.DB.prepare(
-    'SELECT COUNT(*) as total FROM multi_modal_documents'
-  ).first();
+  try {
+    const docCount = await c.env.DB.prepare(
+      'SELECT COUNT(*) as total FROM multi_modal_documents'
+    ).first();
 
-  const docsByType = await c.env.DB.prepare(
-    'SELECT type, COUNT(*) as count FROM multi_modal_documents GROUP BY type'
-  ).all();
+    const docsByType = await c.env.DB.prepare(
+      'SELECT type, COUNT(*) as count FROM multi_modal_documents GROUP BY type'
+    ).all();
 
-  const searchCount = await c.env.DB.prepare(
-    'SELECT COUNT(*) as total FROM multi_modal_searches'
-  ).first();
+    const searchCount = await c.env.DB.prepare(
+      'SELECT COUNT(*) as total FROM multi_modal_searches'
+    ).first();
 
-  const avgLatency = await c.env.DB.prepare(
-    'SELECT AVG(latency_ms) as avg FROM multi_modal_searches'
-  ).first();
+    const avgLatency = await c.env.DB.prepare(
+      'SELECT AVG(latency_ms) as avg FROM multi_modal_searches'
+    ).first();
 
-  return c.json({
-    metrics: {
-      totalDocuments: docCount?.total || 0,
-      documentsByType: Object.fromEntries(
-        (docsByType.results || []).map((r: any) => [r.type, r.count])
-      ),
-      totalSearches: searchCount?.total || 0,
-      avgLatencyMs: avgLatency?.avg || 0,
-    },
-  });
+    return c.json({
+      metrics: {
+        totalDocuments: docCount?.total || 0,
+        documentsByType: Object.fromEntries(
+          (docsByType.results || []).map((r: { type: string; count: number }) => [r.type, r.count])
+        ),
+        totalSearches: searchCount?.total || 0,
+        avgLatencyMs: avgLatency?.avg || 0,
+      },
+    });
+  } catch {
+    return c.json({
+      metrics: {
+        totalDocuments: 0,
+        documentsByType: {},
+        totalSearches: 0,
+        avgLatencyMs: 0,
+      },
+    });
+  }
 });
 
 export default multiModalRAG;
