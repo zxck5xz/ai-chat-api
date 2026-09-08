@@ -25,12 +25,12 @@ const runs = new Map<string, any>();
 app.get('/patterns', (c) => {
   return c.json({
     patterns: [
-      { id: 'supervisor', name: 'Supervisor', description: 'Central agent routes to specialist subagents' },
-      { id: 'supervisor-code', name: 'Code Review Supervisor', description: 'Researcher → Coder → Reviewer pipeline' },
-      { id: 'swarm', name: 'Swarm', description: 'Decentralized agent collaboration with handoffs' },
-      { id: 'swarm-code', name: 'Code Swarm', description: 'Writer → Checker → Fixer with quality loop' },
-      { id: 'hierarchical', name: 'Hierarchical', description: 'Manager decomposes → Workers parallel → Aggregator' },
-      { id: 'hierarchical-review', name: 'Parallel Review', description: 'Security + Performance + Style reviewers in parallel' },
+      { id: 'supervisor', name: 'Supervisor', description: 'Central agent routes to specialist subagents', agents: ['researcher', 'coder', 'reviewer'] },
+      { id: 'supervisor-code', name: 'Code Review Supervisor', description: 'Researcher → Coder → Reviewer pipeline', agents: ['researcher', 'coder', 'reviewer'] },
+      { id: 'swarm', name: 'Swarm', description: 'Decentralized agent collaboration with handoffs', agents: ['writer', 'checker', 'fixer'] },
+      { id: 'swarm-code', name: 'Code Swarm', description: 'Writer → Checker → Fixer with quality loop', agents: ['writer', 'checker', 'fixer'] },
+      { id: 'hierarchical', name: 'Hierarchical', description: 'Manager decomposes → Workers parallel → Aggregator', agents: ['manager', 'impl', 'test', 'doc'] },
+      { id: 'hierarchical-review', name: 'Parallel Review', description: 'Security + Performance + Style reviewers in parallel', agents: ['security', 'performance', 'style'] },
     ],
   });
 });
