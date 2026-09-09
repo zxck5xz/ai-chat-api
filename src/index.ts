@@ -23,6 +23,8 @@ import mcp from './routes/mcp';
 import modelVersioning from './routes/model-versioning';
 import multiModalRAG from './routes/multi-modal-rag';
 import langgraph from './routes/langgraph';
+import agenticRAG from './routes/agentic-rag';
+import memory from './routes/memory';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -67,6 +69,8 @@ app.route('/api/mcp', mcp);
 app.route('/api/model-versioning', modelVersioning);
 app.route('/api/multi-modal-rag', multiModalRAG);
 app.route('/api/langgraph', langgraph);
+app.route('/api/agentic-rag', agenticRAG);
+app.route('/api/memory', memory);
 
 // 404 handler
 app.notFound((c) => {

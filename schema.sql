@@ -629,3 +629,159 @@ CREATE TABLE IF NOT EXISTS langgraph_approvals (
 
 CREATE INDEX IF NOT EXISTS idx_lg_approvals_thread ON langgraph_approvals(thread_id);
 CREATE INDEX IF NOT EXISTS idx_lg_approvals_status ON langgraph_approvals(status);
+
+-- ============================================================
+-- Project 15: Agentic RAG with Self-Correction
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS agentic_rag_runs (
+  id TEXT PRIMARY KEY,
+  query TEXT NOT NULL,
+  analysis TEXT NOT NULL,
+  final_answer TEXT,
+  confidence_score REAL,
+  confidence_reasoning TEXT,
+  has_hallucination INTEGER DEFAULT 0,
+  citation_coverage REAL,
+  contradictions_found INTEGER DEFAULT 0,
+  total_rounds INTEGER DEFAULT 0,
+  total_latency_ms INTEGER DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'failed', 'timeout')),
+  created_at TEXT DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS agentic_rag_steps (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  step_number INTEGER NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('classify', 'retrieve', 'generate', 'evaluate', 'correct', 'synthesize')),
+  query TEXT NOT NULL,
+  input TEXT NOT NULL,
+  output TEXT NOT NULL,
+  latency_ms INTEGER DEFAULT 0,
+  metadata TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (run_id) REFERENCES agentic_rag_runs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS agentic_rag_retrieval_rounds (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  round_number INTEGER NOT NULL,
+  query TEXT NOT NULL,
+  strategy TEXT NOT NULL,
+  chunks_retrieved INTEGER DEFAULT 0,
+  avg_relevance_score REAL DEFAULT 0,
+  top_score REAL DEFAULT 0,
+  latency_ms INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (run_id) REFERENCES agentic_rag_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_agentic_rag_runs_created ON agentic_rag_runs(created_at);
+CREATE INDEX IF NOT EXISTS idx_agentic_rag_steps_run ON agentic_rag_steps(run_id);
+CREATE INDEX IF NOT EXISTS idx_agentic_rag_rounds_run ON agentic_rag_retrieval_rounds(run_id);
+
+-- ============================================================
+-- Project 16: Long-Term Agent Memory
+-- ============================================================
+
+-- Episodic Memory: past interactions with timestamps, topics, outcomes
+CREATE TABLE IF NOT EXISTS memory_episodic (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT 'default',
+  conversation_id TEXT,
+  content TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  topics TEXT NOT NULL DEFAULT '[]',
+  outcome TEXT NOT NULL DEFAULT 'neutral' CHECK (outcome IN ('positive', 'negative', 'neutral')),
+  sentiment REAL NOT NULL DEFAULT 0.5,
+  importance REAL NOT NULL DEFAULT 0.5,
+  access_count INTEGER NOT NULL DEFAULT 1,
+  last_accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  strength REAL NOT NULL DEFAULT 1.0,
+  consolidated INTEGER NOT NULL DEFAULT 0,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_mem_ep_user ON memory_episodic(user_id);
+CREATE INDEX IF NOT EXISTS idx_mem_ep_created ON memory_episodic(created_at);
+CREATE INDEX IF NOT EXISTS idx_mem_ep_strength ON memory_episodic(strength);
+CREATE INDEX IF NOT EXISTS idx_mem_ep_consolidated ON memory_episodic(consolidated);
+
+-- Semantic Memory: extracted facts and knowledge with confidence scores
+CREATE TABLE IF NOT EXISTS memory_semantic (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT 'default',
+  fact TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'general',
+  confidence REAL NOT NULL DEFAULT 0.7,
+  source_episodic_id TEXT,
+  source_type TEXT NOT NULL DEFAULT 'extracted' CHECK (source_type IN ('extracted', 'consolidated', 'user_provided')),
+  access_count INTEGER NOT NULL DEFAULT 1,
+  last_accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  strength REAL NOT NULL DEFAULT 1.0,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_mem_sem_user ON memory_semantic(user_id);
+CREATE INDEX IF NOT EXISTS idx_mem_sem_category ON memory_semantic(category);
+CREATE INDEX IF NOT EXISTS idx_mem_sem_confidence ON memory_semantic(confidence);
+CREATE INDEX IF NOT EXISTS idx_mem_sem_strength ON memory_semantic(strength);
+
+-- Knowledge Graph: entities + relationships
+CREATE TABLE IF NOT EXISTS memory_kg_nodes (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT 'default',
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  properties TEXT NOT NULL DEFAULT '{}',
+  strength REAL NOT NULL DEFAULT 1.0,
+  access_count INTEGER NOT NULL DEFAULT 1,
+  last_accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_mem_kg_node_user ON memory_kg_nodes(user_id);
+CREATE INDEX IF NOT EXISTS idx_mem_kg_node_type ON memory_kg_nodes(type);
+CREATE INDEX IF NOT EXISTS idx_mem_kg_node_name ON memory_kg_nodes(name);
+
+CREATE TABLE IF NOT EXISTS memory_kg_edges (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT 'default',
+  source_node_id TEXT NOT NULL,
+  target_node_id TEXT NOT NULL,
+  relationship TEXT NOT NULL,
+  weight REAL NOT NULL DEFAULT 1.0,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (source_node_id) REFERENCES memory_kg_nodes(id) ON DELETE CASCADE,
+  FOREIGN KEY (target_node_id) REFERENCES memory_kg_nodes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_mem_kg_edge_user ON memory_kg_edges(user_id);
+CREATE INDEX IF NOT EXISTS idx_mem_kg_edge_source ON memory_kg_edges(source_node_id);
+CREATE INDEX IF NOT EXISTS idx_mem_kg_edge_target ON memory_kg_edges(target_node_id);
+CREATE INDEX IF NOT EXISTS idx_mem_kg_edge_rel ON memory_kg_edges(relationship);
+
+-- Memory Access Log: tracks which memories were accessed and why
+CREATE TABLE IF NOT EXISTS memory_access_log (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL DEFAULT 'default',
+  memory_type TEXT NOT NULL CHECK (memory_type IN ('episodic', 'semantic', 'knowledge_graph')),
+  memory_id TEXT NOT NULL,
+  query TEXT NOT NULL,
+  relevance_score REAL NOT NULL DEFAULT 0,
+  used_in_response INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_mem_access_user ON memory_access_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_mem_access_type ON memory_access_log(memory_type);
+CREATE INDEX IF NOT EXISTS idx_mem_access_date ON memory_access_log(created_at);
