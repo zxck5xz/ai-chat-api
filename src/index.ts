@@ -25,6 +25,7 @@ import multiModalRAG from './routes/multi-modal-rag';
 import langgraph from './routes/langgraph';
 import agenticRAG from './routes/agentic-rag';
 import memory from './routes/memory';
+import debate from './routes/debate';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -71,6 +72,7 @@ app.route('/api/multi-modal-rag', multiModalRAG);
 app.route('/api/langgraph', langgraph);
 app.route('/api/agentic-rag', agenticRAG);
 app.route('/api/memory', memory);
+app.route('/api/debate', debate);
 
 // 404 handler
 app.notFound((c) => {

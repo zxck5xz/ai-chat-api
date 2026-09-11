@@ -785,3 +785,28 @@ CREATE TABLE IF NOT EXISTS memory_access_log (
 CREATE INDEX IF NOT EXISTS idx_mem_access_user ON memory_access_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_mem_access_type ON memory_access_log(memory_type);
 CREATE INDEX IF NOT EXISTS idx_mem_access_date ON memory_access_log(created_at);
+
+-- ============================================================
+-- Project 17: Multi-Agent Debate & Verifier
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS debate_runs (
+  id TEXT PRIMARY KEY,
+  question TEXT NOT NULL,
+  format TEXT NOT NULL CHECK (format IN ('oxford', 'lincoln_douglas', 'free_form')),
+  status TEXT NOT NULL CHECK (status IN ('pending', 'debating', 'judging', 'fact_checking', 'consensus', 'completed', 'failed')),
+  debaters TEXT NOT NULL DEFAULT '[]',
+  judge_verdict TEXT,
+  fact_check TEXT,
+  consensus TEXT,
+  total_rounds INTEGER NOT NULL DEFAULT 0,
+  total_claims INTEGER NOT NULL DEFAULT 0,
+  accuracy_rate REAL NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_debate_status ON debate_runs(status);
+CREATE INDEX IF NOT EXISTS idx_debate_format ON debate_runs(format);
+CREATE INDEX IF NOT EXISTS idx_debate_created ON debate_runs(created_at);
