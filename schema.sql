@@ -810,3 +810,24 @@ CREATE TABLE IF NOT EXISTS debate_runs (
 CREATE INDEX IF NOT EXISTS idx_debate_status ON debate_runs(status);
 CREATE INDEX IF NOT EXISTS idx_debate_format ON debate_runs(format);
 CREATE INDEX IF NOT EXISTS idx_debate_created ON debate_runs(created_at);
+
+-- ============================================================
+-- Project 18: Edge AI Inference
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS edge_ai_inferences (
+  id TEXT PRIMARY KEY,
+  model_id TEXT NOT NULL,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  mode TEXT NOT NULL CHECK (mode IN ('local', 'cloud', 'hybrid')),
+  tokens_per_second REAL NOT NULL DEFAULT 0,
+  latency_ms INTEGER NOT NULL DEFAULT 0,
+  memory_mb REAL NOT NULL DEFAULT 0,
+  provider TEXT NOT NULL CHECK (provider IN ('webllm', 'onnx', 'cloud')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_edge_ai_model ON edge_ai_inferences(model_id);
+CREATE INDEX IF NOT EXISTS idx_edge_ai_mode ON edge_ai_inferences(mode);
+CREATE INDEX IF NOT EXISTS idx_edge_ai_created ON edge_ai_inferences(created_at);

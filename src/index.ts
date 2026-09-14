@@ -26,6 +26,7 @@ import langgraph from './routes/langgraph';
 import agenticRAG from './routes/agentic-rag';
 import memory from './routes/memory';
 import debate from './routes/debate';
+import edgeAI from './routes/edge-ai';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -73,6 +74,7 @@ app.route('/api/langgraph', langgraph);
 app.route('/api/agentic-rag', agenticRAG);
 app.route('/api/memory', memory);
 app.route('/api/debate', debate);
+app.route('/api/edge-ai', edgeAI);
 
 // 404 handler
 app.notFound((c) => {
