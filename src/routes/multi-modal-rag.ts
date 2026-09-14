@@ -197,7 +197,9 @@ multiModalRAG.get('/metrics', async (c) => {
       metrics: {
         totalDocuments: docCount?.total || 0,
         documentsByType: Object.fromEntries(
-          (docsByType.results || []).map((r: { type: string; count: number }) => [r.type, r.count])
+          ((docsByType.results || []) as unknown as Array<{ type: string; count: number }>).map(
+            (r) => [r.type, r.count]
+          )
         ),
         totalSearches: searchCount?.total || 0,
         avgLatencyMs: avgLatency?.avg || 0,

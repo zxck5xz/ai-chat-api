@@ -4,7 +4,15 @@ import type { Context, Next } from 'hono';
 const PUBLIC_PATHS = [
   '/',
   '/api/health',
+  // Project 19: tier catalog is public so prospective tenants can read pricing
+  '/api/aaas/tiers',
+  '/api/aaas/health',
 ];
+
+// Prefixes that carry their own authentication instead of the platform API key.
+// Project 19: /api/aaas/v1/* authenticates a per-tenant key via tenantAuth,
+// which also applies that tenant's rate limit and quota.
+const SELF_AUTHENTICATED_PREFIXES = ['/api/aaas/v1/'];
 
 export function authMiddleware(apiKey: string) {
   return async (c: Context, next: Next) => {
@@ -12,6 +20,11 @@ export function authMiddleware(apiKey: string) {
 
     // Allow public paths
     if (PUBLIC_PATHS.includes(path)) {
+      return next();
+    }
+
+    // Routes that authenticate themselves downstream
+    if (SELF_AUTHENTICATED_PREFIXES.some((prefix) => path.startsWith(prefix))) {
       return next();
     }
 

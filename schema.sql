@@ -831,3 +831,122 @@ CREATE TABLE IF NOT EXISTS edge_ai_inferences (
 CREATE INDEX IF NOT EXISTS idx_edge_ai_model ON edge_ai_inferences(model_id);
 CREATE INDEX IF NOT EXISTS idx_edge_ai_mode ON edge_ai_inferences(mode);
 CREATE INDEX IF NOT EXISTS idx_edge_ai_created ON edge_ai_inferences(created_at);
+
+-- ============================================================
+-- Project 19: Structured Output Validation + Agent-as-a-Service
+-- ============================================================
+
+-- Schema registry: versioned by name, never overwritten in place
+CREATE TABLE IF NOT EXISTS output_schemas (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  description TEXT,
+  schema_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (name, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_output_schemas_name ON output_schemas(name);
+CREATE INDEX IF NOT EXISTS idx_output_schemas_updated ON output_schemas(updated_at);
+
+-- One row per structured generation run, for success-rate metrics
+CREATE TABLE IF NOT EXISTS structured_generations (
+  id TEXT PRIMARY KEY,
+  schema_name TEXT,
+  prompt TEXT NOT NULL,
+  success INTEGER NOT NULL DEFAULT 0,
+  total_attempts INTEGER NOT NULL DEFAULT 1,
+  final_output TEXT,
+  errors TEXT,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_structured_gen_schema ON structured_generations(schema_name);
+CREATE INDEX IF NOT EXISTS idx_structured_gen_success ON structured_generations(success);
+CREATE INDEX IF NOT EXISTS idx_structured_gen_created ON structured_generations(created_at);
+
+-- Tenants: the billing and rate-limit unit
+CREATE TABLE IF NOT EXISTS tenants (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT,
+  tier TEXT NOT NULL DEFAULT 'free' CHECK (tier IN ('free', 'starter', 'pro', 'enterprise')),
+  webhook_url TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenants_tier ON tenants(tier);
+CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(status);
+
+-- API keys: only the SHA-256 hash is stored, never the plaintext
+CREATE TABLE IF NOT EXISTS api_keys (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  key_prefix TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE,
+  tier TEXT NOT NULL DEFAULT 'free' CHECK (tier IN ('free', 'starter', 'pro', 'enterprise')),
+  scopes TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+  last_used_at TEXT,
+  expires_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  revoked_at TEXT,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);
+
+-- Per-request usage, aggregated into summaries and invoices
+CREATE TABLE IF NOT EXISTS usage_records (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  api_key_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  method TEXT NOT NULL,
+  status_code INTEGER NOT NULL,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_tenant ON usage_records(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_usage_key ON usage_records(api_key_id);
+CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_records(created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_tenant_created ON usage_records(tenant_id, created_at);
+
+-- Sliding-window rate limit buckets (two buckets per tenant per window kind)
+CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  window_kind TEXT NOT NULL CHECK (window_kind IN ('minute', 'day')),
+  window_index INTEGER NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limit_tenant ON rate_limit_buckets(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_rate_limit_expires ON rate_limit_buckets(expires_at);
+
+-- Billing events; delivered = 0 rows are retryable
+CREATE TABLE IF NOT EXISTS billing_events (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('quota_warning', 'quota_exceeded', 'tier_changed', 'key_created', 'key_revoked', 'invoice_generated')),
+  payload TEXT NOT NULL DEFAULT '{}',
+  delivered INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_tenant ON billing_events(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_billing_type ON billing_events(type);
+CREATE INDEX IF NOT EXISTS idx_billing_delivered ON billing_events(delivered);
